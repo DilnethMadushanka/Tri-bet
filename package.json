@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "BetDouble games (virtual coins)",
   "engines": {
-    "node": ">=22.5"
+    "node": ">=22.13"
   },
   "main": "src/server.js",
   "scripts": {

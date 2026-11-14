@@ -1,26 +1,24 @@
-process.env.DB_PATH = ':memory:';
-process.env.CRASH_AUTOSTART = 'false';
+const { db, game, settings, user, bal, ledgerSum, close, cleanup } = require('./helpers');
 const test = require('node:test');
 const assert = require('node:assert');
 const crypto = require('node:crypto');
-const { db } = require('../src/db');
-const game = require('../src/game');
-const settings = require('../src/settings');
 const payments = require('../src/payments');
-const { Crash, crashPointFromSeed, hashSeed, multAt, msToReach } = require('../src/crash');
+const crash = require('../src/crash');
+const { crashPointFromSeed, hashSeed, multAt, msToReach } = crash;
 
-let n = 0;
-const user = (opts = {}) => game.registerUser({ username: `u${++n}`, passwordHash: 'x', ...opts });
-const bal = (id) => game.getUser(id).balance;
-const ledgerSum = (id) => db.prepare('SELECT SUM(amount) AS s FROM ledger WHERE user_id = ?').get(id).s;
-const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
+test.before(() => settings.load(true));
+test.after(cleanup);
 
-// A round with a crash point we choose.
-function round(c, cp, now) {
-  const r = c.newRound(now);
-  r.crashPoint = cp;
-  return r;
+// Each test gets its own round far in the "future", with a crash point we choose.
+let T = Date.now();
+async function round(cp) {
+  T += 10 * 86400000;
+  const r0 = await crash.current(T);
+  const crashAt = Math.ceil(r0.betting_ends_at + msToReach(cp));
+  await db.run('UPDATE rounds SET crash_point = ?, crash_at = ? WHERE id = ?', cp, crashAt, r0.id);
+  return db.get('SELECT * FROM rounds WHERE id = ?', r0.id);
 }
+const my = (id, now) => crash.myBet(id, now);
 
 test('crash points follow the house edge', () => {
   const N = 40000;
@@ -32,11 +30,10 @@ test('crash points follow the house edge', () => {
     if (cp >= 2) over2++;
     if (cp >= 10) over10++;
   }
-  // P(cp >= m) = 0.97 / m
   assert.ok(Math.abs(over2 / N - 0.485) < 0.015, `P(>=2) ${over2 / N}`);
   assert.ok(Math.abs(over10 / N - 0.097) < 0.01, `P(>=10) ${over10 / N}`);
   assert.ok(Math.abs(instant / N - (1 - 0.97 / 1.01)) < 0.006, `instant ${instant / N}`);
-  assert.equal(crashPointFromSeed('abc', 3), crashPointFromSeed('abc', 3)); // same seed, same result
+  assert.equal(crashPointFromSeed('abc', 3), crashPointFromSeed('abc', 3));
   assert.equal(crashPointFromSeed(crypto.randomBytes(32).toString('hex'), 3, 5) <= 5, true);
 });
 
@@ -46,150 +43,166 @@ test('multiplier curve', () => {
   assert.ok(multAt(msToReach(2) - 50) < 2);
 });
 
-test('round: manual cash-out wins, auto cash-out wins, the rest lose', () => {
-  const c = new Crash();
-  const a = user(), b = user(), d = user();
-  const t0 = 1_000_000;
-  const r = round(c, 3.5, t0);
+test('round timetable: betting, running, crashed, then the next round', async () => {
+  const r = await round(3);
   assert.equal(r.hash, hashSeed(r.seed));
-  c.placeBet(a, 10, null, t0 + 100);
-  c.placeBet(b, 20, 1.5, t0 + 200);
-  c.placeBet(d, 30, null, t0 + 300);
-  assert.throws(() => c.placeBet(a, 5, null, t0 + 400), /already have a bet/);
-  assert.equal(bal(a), 90);
-  c.startRunning(t0 + 7000);
-  assert.throws(() => c.placeBet(user(), 5, null, t0 + 7001), /closed/);
-  assert.throws(() => c.cancelBet(a, t0 + 7001), /started/);
+  let st = await crash.publicState(r.created_at + 10);
+  assert.equal(st.round.status, 'betting');
+  assert.equal(st.round.crashPoint, null);
+  assert.equal(st.round.seed, null); // secret until the crash
+  st = await crash.publicState(r.betting_ends_at + 100);
+  assert.equal(st.round.status, 'running');
+  st = await crash.publicState(r.crash_at + 1);
+  assert.equal(st.round.status, 'crashed');
+  assert.equal(st.round.crashPoint, 3);
+  assert.equal(st.round.seed, r.seed);
+  assert.equal(st.history[0].crashPoint, 3);
+  st = await crash.publicState(r.crash_at + settings.get('pauseSeconds') * 1000 + 5);
+  assert.equal(st.round.id, r.id + 1);
+  assert.equal(st.round.status, 'betting');
+});
 
-  const tOut = t0 + 7000 + msToReach(2.2) + 5;
-  c.tick(tOut); // b's auto 1.5x is due
-  assert.equal(c.myBet(b).status, 'won');
-  assert.equal(c.myBet(b).cashoutAt, 1.5);
-  close(bal(b), 80 + 30);
-  const res = c.cashout(a, tOut);
+test('manual cash-out wins, auto cash-out wins, the rest lose', async () => {
+  const a = await user(), b = await user(), d = await user();
+  const r = await round(3.5);
+  const t0 = r.created_at;
+  await crash.placeBet(a, 10, null, t0 + 100);
+  await crash.placeBet(b, 20, 1.5, t0 + 200);
+  await crash.placeBet(d, 30, null, t0 + 300);
+  await assert.rejects(crash.placeBet(a, 5, null, t0 + 400), /already have a bet/);
+  assert.equal(await bal(a), 90);
+  const run = r.betting_ends_at;
+  await assert.rejects(crash.placeBet(await user(), 5, null, run + 1), /closed/);
+  await assert.rejects(crash.cancelBet(a, run + 1), /started/);
+
+  const tOut = run + msToReach(2.2) + 5;
+  await crash.current(tOut); // b's auto 1.5x is due
+  assert.equal((await my(b)).status, 'won');
+  assert.equal((await my(b)).cashoutAt, 1.5);
+  close(await bal(b), 80 + 30);
+  const res = await crash.cashout(a, tOut);
   assert.equal(res.multiplier, 2.2);
-  close(bal(a), 90 + 22);
-  assert.throws(() => c.cashout(a, tOut + 10), /Already/);
+  close(await bal(a), 90 + 22);
+  await assert.rejects(crash.cashout(a, tOut + 10), /Already/);
 
-  const tCrash = r.crashAt;
-  assert.throws(() => c.cashout(d, tCrash + 1), /Too late/);
-  assert.equal(r.status, 'crashed');
-  assert.equal(c.myBet(d).status, 'lost');
-  close(bal(d), 70);
-  const row = db.prepare('SELECT * FROM rounds WHERE id = ?').get(r.id);
+  await assert.rejects(crash.cashout(d, r.crash_at + 1), /Too late/);
+  assert.equal((await my(d)).status, 'lost');
+  close(await bal(d), 70);
+  const row = await db.get('SELECT * FROM rounds WHERE id = ?', r.id);
   assert.equal(row.status, 'crashed');
   close(row.total_bet, 60);
   close(row.total_paid, 52);
-  assert.equal(c.publicState().history[0].crashPoint, 3.5);
-  for (const id of [a, b, d]) close(bal(id), ledgerSum(id));
+  for (const id of [a, b, d]) close(await bal(id), await ledgerSum(id));
 });
 
-test('auto cash-out that the round never reaches loses; auto at exactly the crash point wins', () => {
-  const c = new Crash();
-  const a = user(), b = user();
-  const r = round(c, 2, 0);
-  c.placeBet(a, 10, 2, 1);
-  c.placeBet(b, 10, 2.01, 1);
-  c.startRunning(1000);
-  c.tick(r.crashAt + 100); // skipped straight past: still paid at the exact target
-  assert.equal(c.myBet(a).status, 'won');
-  close(c.myBet(a).payout, 20);
-  assert.equal(c.myBet(b).status, 'lost');
+test('settling twice pays once', async () => {
+  const a = await user();
+  const r = await round(2);
+  await crash.placeBet(a, 10, 1.5, r.created_at + 1);
+  await Promise.all([crash.current(r.crash_at + 5), crash.current(r.crash_at + 6), crash.publicState(r.crash_at + 7)]);
+  close(await bal(a), 105);
+  close(await bal(a), await ledgerSum(a));
 });
 
-test('instant crash at 1.00x', () => {
-  const c = new Crash();
-  const a = user();
-  round(c, 1, 0);
-  c.placeBet(a, 10, 1.01, 1);
-  c.startRunning(1000);
-  assert.equal(c.round.status, 'crashed');
-  assert.equal(c.myBet(a).status, 'lost');
+test('auto cash-out the round never reaches loses; auto at exactly the crash point wins', async () => {
+  const a = await user(), b = await user();
+  const r = await round(2);
+  await crash.placeBet(a, 10, 2, r.created_at + 1);
+  await crash.placeBet(b, 10, 2.01, r.created_at + 1);
+  await crash.current(r.crash_at + 100); // nobody polled during the flight: still paid at the exact target
+  assert.equal((await my(a)).status, 'won');
+  close((await my(a)).payout, 20);
+  assert.equal((await my(b)).status, 'lost');
 });
 
-test('cancel refunds; limits on amount and balance', () => {
-  const c = new Crash();
-  const a = user();
-  round(c, 5, 0);
-  assert.throws(() => c.placeBet(a, 0.5, null, 1), /between/);
-  assert.throws(() => c.placeBet(a, 5000, null, 1), /between/);
-  assert.throws(() => c.placeBet(a, 500, null, 1), /Not enough/);
-  assert.throws(() => c.placeBet(a, 10, 1.0, 1), /Auto cash-out/);
-  c.placeBet(a, 40, null, 1);
-  c.cancelBet(a, 2);
-  assert.equal(bal(a), 100);
-  c.placeBet(a, 40, null, 3); // can bet again after cancelling
-  assert.equal(bal(a), 60);
+test('instant crash at 1.00x', async () => {
+  const a = await user();
+  const r = await round(1);
+  assert.equal(r.crash_at, r.betting_ends_at);
+  await crash.placeBet(a, 10, 1.01, r.created_at + 1);
+  const st = await crash.publicState(r.betting_ends_at);
+  assert.equal(st.round.status, 'crashed');
+  assert.equal((await my(a)).status, 'lost');
 });
 
-test('max win caps the payout', () => {
-  settings.update({ maxWin: 100, maxBet: 50 });
+test('cancel refunds; limits on amount and balance', async () => {
+  const a = await user();
+  const r = await round(5);
+  const t = r.created_at;
+  await assert.rejects(crash.placeBet(a, 0.5, null, t + 1), /between/);
+  await assert.rejects(crash.placeBet(a, 5000, null, t + 1), /between/);
+  await assert.rejects(crash.placeBet(a, 500, null, t + 1), /Not enough/);
+  await assert.rejects(crash.placeBet(a, 10, 1.0, t + 1), /Auto cash-out/);
+  await crash.placeBet(a, 40, null, t + 1);
+  await crash.cancelBet(a, t + 2);
+  assert.equal(await bal(a), 100);
+  await crash.placeBet(a, 40, null, t + 3); // can bet again after cancelling
+  assert.equal(await bal(a), 60);
+});
+
+test('max win caps the payout', async () => {
+  await settings.update({ maxWin: 100, maxBet: 50 });
   try {
-    const c = new Crash();
-    const a = user();
-    const r = round(c, 50, 0);
-    c.placeBet(a, 20, null, 1);
-    c.startRunning(1000);
-    c.tick(1000 + msToReach(6)); // 20 x 5 = 100 reached at 5x
-    assert.equal(c.myBet(a).status, 'won');
-    close(c.myBet(a).payout, 100);
-    assert.equal(c.myBet(a).cashoutAt, 5);
-    void r;
-  } finally { settings.update({ maxWin: 50000, maxBet: 1000 }); }
+    const a = await user();
+    const r = await round(50);
+    await crash.placeBet(a, 20, null, r.created_at + 1);
+    await crash.current(r.betting_ends_at + msToReach(6)); // 20 x 5 = 100 reached at 5x
+    assert.equal((await my(a)).status, 'won');
+    close((await my(a)).payout, 100);
+    assert.equal((await my(a)).cashoutAt, 5);
+  } finally { await settings.update({ maxWin: 50000, maxBet: 1000 }); }
 });
 
-test('responsible play: break and 24-hour limit', () => {
-  const c = new Crash();
-  const a = user(), b = user();
-  game.setPlay(a, { dailyBetLimit: 15 }, 0);
-  round(c, 5, 10);
-  c.placeBet(a, 10, null, 11);
-  c.cancelBet(a, 12); // refunded bets don't count
-  c.placeBet(a, 15, null, 13);
-  c.startRunning(1000); c.tick(c.round.crashAt);
-  round(c, 5, c.round.crashAt + 10);
-  assert.throws(() => c.placeBet(a, 1, null, c.round.createdAt + 1), /24-hour bet limit/);
-  game.setPlay(b, { breakDays: 1 }, c.round.createdAt);
-  assert.throws(() => c.placeBet(b, 1, null, c.round.createdAt + 1), /break/);
-  assert.throws(() => payments.deposit(b, 10, c.round.createdAt + 1), /break/);
+test('paused game opens no new rounds', async () => {
+  const r = await round(2);
+  await settings.update({ gamePaused: true });
+  try {
+    const st = await crash.publicState(r.crash_at + 60000);
+    assert.equal(st.round.id, r.id);
+    assert.equal(st.round.status, 'crashed');
+  } finally { await settings.update({ gamePaused: false }); }
 });
 
-test('referral: inviter earns % of played bets, not cancelled ones', () => {
-  const c = new Crash();
-  const inv = user();
-  const code = game.getUser(inv).referral_code;
-  const f = user({ referralCode: code });
-  assert.equal(bal(f), 150); // welcome + invite bonus
-  round(c, 3, 0);
-  c.placeBet(f, 100, null, 1);
-  c.cancelBet(f, 2);
-  c.placeBet(f, 100, null, 3);
-  c.startRunning(1000); c.tick(c.round.crashAt);
-  close(bal(inv), 100 + 0.5); // 0.5% of 100
-  assert.equal(game.referralStats(inv).activeCount, 1);
-  assert.throws(() => user({ referralCode: 'NOPE' }), /not valid/);
+test('responsible play: break and 24-hour limit', async () => {
+  const a = await user(), b = await user();
+  let r = await round(5);
+  await game.setPlay(a, { dailyBetLimit: 15 }, r.created_at);
+  await crash.placeBet(a, 10, null, r.created_at + 1);
+  await crash.cancelBet(a, r.created_at + 2); // refunded bets don't count
+  await crash.placeBet(a, 15, null, r.created_at + 3);
+  await crash.current(r.crash_at);
+  const t = r.crash_at + settings.get('pauseSeconds') * 1000 + 1;
+  r = await crash.current(t);
+  await assert.rejects(crash.placeBet(a, 1, null, t + 1), /24-hour bet limit/);
+  await game.setPlay(b, { breakDays: 1 }, t);
+  await assert.rejects(crash.placeBet(b, 1, null, t + 1), /break/);
+  await assert.rejects(payments.deposit(b, 10, t + 1), /break/);
 });
 
-test('restart refunds bets of an unfinished round', () => {
-  const c = new Crash();
-  const a = user();
-  const r = round(c, 3, 0);
-  c.placeBet(a, 25, null, 1);
-  c.startRunning(1000);
-  new Crash().recover(2000);
-  assert.equal(bal(a), 100);
-  assert.equal(db.prepare('SELECT status FROM rounds WHERE id = ?').get(r.id).status, 'void');
+test('referral: inviter earns % of played bets, not cancelled ones', async () => {
+  const inv = await user();
+  const code = (await game.getUser(inv)).referral_code;
+  const f = await user({ referralCode: code });
+  assert.equal(await bal(f), 150); // welcome + invite bonus
+  const r = await round(3);
+  await crash.placeBet(f, 100, null, r.created_at + 1);
+  await crash.cancelBet(f, r.created_at + 2);
+  await crash.placeBet(f, 100, null, r.created_at + 3);
+  await crash.current(r.crash_at);
+  close(await bal(inv), 100 + 0.5); // 0.5% of 100
+  assert.equal((await game.referralStats(inv)).activeCount, 1);
+  await assert.rejects(user({ referralCode: 'NOPE' }), /not valid/);
 });
 
-test('withdrawal: reject refunds, approve keeps coins off', () => {
-  const a = user();
-  payments.withdraw(a, 30);
-  assert.equal(bal(a), 70);
-  const w = db.prepare('SELECT id FROM withdrawals WHERE user_id = ?').get(a);
-  payments.decideWithdrawal(1, w.id, false, 'no');
-  assert.equal(bal(a), 100);
-  payments.withdraw(a, 20);
-  payments.decideWithdrawal(1, db.prepare("SELECT id FROM withdrawals WHERE user_id = ? AND status = 'pending'").get(a).id, true);
-  assert.equal(bal(a), 80);
-  close(bal(a), ledgerSum(a));
+test('withdrawal: reject refunds, approve keeps coins off', async () => {
+  const a = await user();
+  await payments.withdraw(a, 30);
+  assert.equal(await bal(a), 70);
+  const w = await db.get('SELECT id FROM withdrawals WHERE user_id = ?', a);
+  await payments.decideWithdrawal(1, w.id, false, 'no');
+  assert.equal(await bal(a), 100);
+  await payments.withdraw(a, 20);
+  await payments.decideWithdrawal(1, (await db.get("SELECT id FROM withdrawals WHERE user_id = ? AND status = 'pending'", a)).id, true);
+  assert.equal(await bal(a), 80);
+  close(await bal(a), await ledgerSum(a));
 });

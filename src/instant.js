@@ -80,167 +80,163 @@ function minesMultiplier(mines, picks, ef = edgeFactor()) {
 }
 
 // ---------- seeds ----------
-function seedOf(userId, now = Date.now()) {
-  let s = db.prepare('SELECT * FROM seeds WHERE user_id = ?').get(userId);
+async function seedOf(userId, now = Date.now()) {
+  let s = await db.get('SELECT * FROM seeds WHERE user_id = ?', userId);
   if (!s) {
     const server = crypto.randomBytes(32).toString('hex');
-    db.prepare('INSERT INTO seeds (user_id, server_seed, server_hash, client_seed, nonce, created_at) VALUES (?, ?, ?, ?, 0, ?)')
-      .run(userId, server, sha256(server), crypto.randomBytes(8).toString('hex'), now);
-    s = db.prepare('SELECT * FROM seeds WHERE user_id = ?').get(userId);
+    await db.run('INSERT INTO seeds (user_id, server_seed, server_hash, client_seed, nonce, created_at) VALUES (?, ?, ?, ?, 0, ?)', userId, server, sha256(server), crypto.randomBytes(8).toString('hex'), now);
+    s = await db.get('SELECT * FROM seeds WHERE user_id = ?', userId);
   }
   return s;
 }
-function publicSeed(userId) {
-  const s = seedOf(userId);
-  const revealed = db.prepare('SELECT server_seed, server_hash, client_seed, last_nonce, revealed_at FROM revealed_seeds WHERE user_id = ? ORDER BY id DESC LIMIT 10').all(userId);
+async function publicSeed(userId) {
+  const s = await seedOf(userId);
+  const revealed = await db.all('SELECT server_seed, server_hash, client_seed, last_nonce, revealed_at FROM revealed_seeds WHERE user_id = ? ORDER BY id DESC LIMIT 10', userId);
   return { serverHash: s.server_hash, clientSeed: s.client_seed, nonce: s.nonce, revealed };
 }
 // Reveals the current server seed and starts a new pair.
-function rotateSeed(userId, clientSeed, now = Date.now()) {
-  return tx(() => {
-    if (db.prepare("SELECT 1 FROM plays WHERE user_id = ? AND status = 'active'").get(userId)) throw new GameError('Finish your Mines game first');
+async function rotateSeed(userId, clientSeed, now = Date.now()) {
+  return tx(async () => {
+    if (await db.get("SELECT 1 AS x FROM plays WHERE user_id = ? AND status = 'active'", userId)) throw new GameError('Finish your Mines game first');
     const cs = String(clientSeed || '').trim() || crypto.randomBytes(8).toString('hex');
     if (!/^[\w-]{1,64}$/.test(cs)) throw new GameError('Client seed: up to 64 letters, numbers, _ or -');
-    const old = seedOf(userId, now);
-    db.prepare('INSERT INTO revealed_seeds (user_id, server_seed, server_hash, client_seed, last_nonce, revealed_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(userId, old.server_seed, old.server_hash, old.client_seed, old.nonce - 1, now);
+    const old = await seedOf(userId, now);
+    await db.run('INSERT INTO revealed_seeds (user_id, server_seed, server_hash, client_seed, last_nonce, revealed_at) VALUES (?, ?, ?, ?, ?, ?)', userId, old.server_seed, old.server_hash, old.client_seed, old.nonce - 1, now);
     const server = crypto.randomBytes(32).toString('hex');
-    db.prepare('UPDATE seeds SET server_seed = ?, server_hash = ?, client_seed = ?, nonce = 0, created_at = ? WHERE user_id = ?')
-      .run(server, sha256(server), cs, now, userId);
+    await db.run('UPDATE seeds SET server_seed = ?, server_hash = ?, client_seed = ?, nonce = 0, created_at = ? WHERE user_id = ?', server, sha256(server), cs, now, userId);
     return { revealedServerSeed: old.server_seed };
   });
 }
 
 // ---------- shared bet handling ----------
-function takeStake(userId, gameId, amount, now) {
+async function takeStake(userId, gameId, amount, now) {
   const s = settings.all();
   amount = round2(Number(amount));
   if (!Number.isFinite(amount) || amount < s.minBet || amount > s.maxBet) throw new GameError(`Bet must be between ${s.minBet} and ${s.maxBet}`);
-  const u = game.getUser(userId);
+  const u = await game.getUser(userId);
   if (!u || u.is_banned) throw new GameError('This account is blocked');
-  game.checkCanBet(u, amount, now);
+  await game.checkCanBet(u, amount, now);
   if (u.balance < amount - 1e-9) throw new GameError('Not enough balance');
-  db.prepare('UPDATE users SET balance = balance - ? WHERE id = ?').run(amount, userId);
-  game.addLedger(userId, 'bet', -amount, `${GAMES[gameId]} bet`, now);
-  const seed = seedOf(userId, now);
-  db.prepare('UPDATE seeds SET nonce = nonce + 1 WHERE user_id = ?').run(userId);
+  await db.run('UPDATE users SET balance = balance - ? WHERE id = ?', amount, userId);
+  await game.addLedger(userId, 'bet', -amount, `${GAMES[gameId]} bet`, now);
+  const seed = await seedOf(userId, now);
+  await db.run('UPDATE seeds SET nonce = nonce + 1 WHERE user_id = ?', userId);
   return { amount, seed, user: u };
 }
 
-function finish(userId, gameId, amount, multiplier, detail, seed, now, playId = null) {
+async function finish(userId, gameId, amount, multiplier, detail, seed, now, playId = null) {
   const won = multiplier > 0;
   const payout = won ? Math.min(round2(amount * multiplier), settings.get('maxWin')) : 0;
-  if (payout > 0) game.credit(userId, payout, 'win', `${GAMES[gameId]} win at ${multiplier}x`, now);
+  if (payout > 0) await game.credit(userId, payout, 'win', `${GAMES[gameId]} win at ${multiplier}x`, now);
   const status = won && multiplier >= 1 ? 'won' : 'lost';
   const json = JSON.stringify(detail);
   if (playId) {
-    db.prepare('UPDATE plays SET payout = ?, multiplier = ?, status = ?, detail = ?, ended_at = ? WHERE id = ?').run(payout, multiplier, status, json, now, playId);
+    await db.run('UPDATE plays SET payout = ?, multiplier = ?, status = ?, detail = ?, ended_at = ? WHERE id = ?', payout, multiplier, status, json, now, playId);
   } else {
-    playId = Number(db.prepare(`INSERT INTO plays (user_id, game, amount, payout, multiplier, status, detail, server_hash, client_seed, nonce, created_at, ended_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(userId, gameId, amount, payout, multiplier, status, json, seed.server_hash, seed.client_seed, seed.nonce, now, now).lastInsertRowid);
+    playId = (await db.run(`INSERT INTO plays (user_id, game, amount, payout, multiplier, status, detail, server_hash, client_seed, nonce, created_at, ended_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, userId, gameId, amount, payout, multiplier, status, json, seed.server_hash, seed.client_seed, seed.nonce, now, now)).lastId;
   }
-  game.payReferral({ amount, round_id: null }, game.getUser(userId), now);
+  await game.payReferral({ amount, round_id: null }, await game.getUser(userId), now);
   return { playId, payout, multiplier, status, profit: round2(payout - amount), nonce: seed.nonce };
 }
 
 // ---------- game actions ----------
-function playDice(userId, { amount, target, mode }, now = Date.now()) {
+async function playDice(userId, { amount, target, mode }, now = Date.now()) {
   mode = mode === 'over' ? 'over' : 'under';
   target = Math.round(Number(target) * 100) / 100;
   const chance = diceChance(mode, target);
   if (!Number.isFinite(target) || chance < 1 || chance > 95) throw new GameError('Win chance must be between 1% and 95%');
-  return tx(() => {
-    const { amount: a, seed } = takeStake(userId, 'dice', amount, now);
+  return tx(async () => {
+    const { amount: a, seed } = await takeStake(userId, 'dice', amount, now);
     const roll = diceRoll(floats(seed.server_seed, seed.client_seed, seed.nonce, 1));
     const win = mode === 'under' ? roll < target : roll > target;
     const mult = diceMultiplier(chance);
-    return { roll, ...finish(userId, 'dice', a, win ? mult : 0, { mode, target, chance, roll, payoutMultiplier: mult }, seed, now) };
+    return { roll, ...(await finish(userId, 'dice', a, win ? mult : 0, { mode, target, chance, roll, payoutMultiplier: mult }, seed, now)) };
   });
 }
 
-function playFlip(userId, { amount, side }, now = Date.now()) {
+async function playFlip(userId, { amount, side }, now = Date.now()) {
   if (side !== 'heads' && side !== 'tails') throw new GameError('Pick heads or tails');
-  return tx(() => {
-    const { amount: a, seed } = takeStake(userId, 'flip', amount, now);
+  return tx(async () => {
+    const { amount: a, seed } = await takeStake(userId, 'flip', amount, now);
     const result = flipSide(floats(seed.server_seed, seed.client_seed, seed.nonce, 1));
     const mult = Math.floor(2 * edgeFactor() * 100) / 100;
-    return { result, ...finish(userId, 'flip', a, result === side ? mult : 0, { side, result }, seed, now) };
+    return { result, ...(await finish(userId, 'flip', a, result === side ? mult : 0, { side, result }, seed, now)) };
   });
 }
 
-function playPlinko(userId, { amount, risk }, now = Date.now()) {
+async function playPlinko(userId, { amount, risk }, now = Date.now()) {
   if (!PLINKO_SHAPES[risk]) throw new GameError('Pick low, medium or high risk');
-  return tx(() => {
-    const { amount: a, seed } = takeStake(userId, 'plinko', amount, now);
+  return tx(async () => {
+    const { amount: a, seed } = await takeStake(userId, 'plinko', amount, now);
     const path = plinkoPath(floats(seed.server_seed, seed.client_seed, seed.nonce, PLINKO_ROWS));
     const slot = path.reduce((x, y) => x + y, 0);
     const mult = plinkoTable(risk)[slot];
     // A slot under 1x pays back part of the bet: that counts as a loss.
-    return { path, slot, ...finish(userId, 'plinko', a, mult, { risk, path, slot }, seed, now) };
+    return { path, slot, ...(await finish(userId, 'plinko', a, mult, { risk, path, slot }, seed, now)) };
   });
 }
 
-function activeMines(userId) {
-  const p = db.prepare("SELECT * FROM plays WHERE user_id = ? AND game = 'mines' AND status = 'active'").get(userId);
+async function activeMines(userId) {
+  const p = await db.get("SELECT * FROM plays WHERE user_id = ? AND game = 'mines' AND status = 'active'", userId);
   if (!p) return null;
   const d = JSON.parse(p.detail);
   return { playId: p.id, amount: p.amount, mines: d.mines, revealed: d.revealed, multiplier: minesMultiplier(d.mines, d.revealed.length),
     next: minesMultiplier(d.mines, d.revealed.length + 1), nonce: p.nonce };
 }
 
-function minesStart(userId, { amount, mines }, now = Date.now()) {
+async function minesStart(userId, { amount, mines }, now = Date.now()) {
   mines = Number(mines);
   if (!Number.isInteger(mines) || mines < 1 || mines > 24) throw new GameError('Mines must be between 1 and 24');
-  return tx(() => {
-    if (activeMines(userId)) throw new GameError('You already have a Mines game running');
-    const { amount: a, seed } = takeStake(userId, 'mines', amount, now);
+  return tx(async () => {
+    if (await activeMines(userId)) throw new GameError('You already have a Mines game running');
+    const { amount: a, seed } = await takeStake(userId, 'mines', amount, now);
     const positions = minesPositions(floats(seed.server_seed, seed.client_seed, seed.nonce, mines), mines);
-    db.prepare(`INSERT INTO plays (user_id, game, amount, status, detail, server_hash, client_seed, nonce, created_at)
-      VALUES (?, 'mines', ?, 'active', ?, ?, ?, ?, ?)`).run(userId, a, JSON.stringify({ mines, positions, revealed: [] }), seed.server_hash, seed.client_seed, seed.nonce, now);
-    return { mines: activeMines(userId) };
+    await db.run(`INSERT INTO plays (user_id, game, amount, status, detail, server_hash, client_seed, nonce, created_at)
+      VALUES (?, 'mines', ?, 'active', ?, ?, ?, ?, ?)`, userId, a, JSON.stringify({ mines, positions, revealed: [] }), seed.server_hash, seed.client_seed, seed.nonce, now);
+    return { mines: await activeMines(userId) };
   });
 }
 
-function minesReveal(userId, { tile }, now = Date.now()) {
+async function minesReveal(userId, { tile }, now = Date.now()) {
   tile = Number(tile);
   if (!Number.isInteger(tile) || tile < 0 || tile >= TILES) throw new GameError('Bad tile');
-  return tx(() => {
-    const p = db.prepare("SELECT * FROM plays WHERE user_id = ? AND game = 'mines' AND status = 'active'").get(userId);
+  return tx(async () => {
+    const p = await db.get("SELECT * FROM plays WHERE user_id = ? AND game = 'mines' AND status = 'active'", userId);
     if (!p) throw new GameError('Start a Mines game first');
     const d = JSON.parse(p.detail);
     if (d.revealed.includes(tile)) throw new GameError('Already opened');
     const seed = { server_hash: p.server_hash, client_seed: p.client_seed, nonce: p.nonce };
     if (d.positions.includes(tile)) {
       d.revealed.push(tile); d.hit = tile;
-      const out = finish(userId, 'mines', p.amount, 0, d, seed, now, p.id);
+      const out = await finish(userId, 'mines', p.amount, 0, d, seed, now, p.id);
       return { boom: true, tile, positions: d.positions, ...out };
     }
     d.revealed.push(tile);
     if (d.revealed.length === TILES - d.mines) { // every safe tile found: cash out automatically
-      const out = finish(userId, 'mines', p.amount, minesMultiplier(d.mines, d.revealed.length), d, seed, now, p.id);
+      const out = await finish(userId, 'mines', p.amount, minesMultiplier(d.mines, d.revealed.length), d, seed, now, p.id);
       return { boom: false, tile, done: true, positions: d.positions, ...out };
     }
-    db.prepare('UPDATE plays SET detail = ? WHERE id = ?').run(JSON.stringify(d), p.id);
-    return { boom: false, tile, mines: activeMines(userId) };
+    await db.run('UPDATE plays SET detail = ? WHERE id = ?', JSON.stringify(d), p.id);
+    return { boom: false, tile, mines: await activeMines(userId) };
   });
 }
 
-function minesCashout(userId, now = Date.now()) {
-  return tx(() => {
-    const p = db.prepare("SELECT * FROM plays WHERE user_id = ? AND game = 'mines' AND status = 'active'").get(userId);
+async function minesCashout(userId, now = Date.now()) {
+  return tx(async () => {
+    const p = await db.get("SELECT * FROM plays WHERE user_id = ? AND game = 'mines' AND status = 'active'", userId);
     if (!p) throw new GameError('No Mines game running');
     const d = JSON.parse(p.detail);
     if (!d.revealed.length) throw new GameError('Open at least one tile first');
     const seed = { server_hash: p.server_hash, client_seed: p.client_seed, nonce: p.nonce };
-    const out = finish(userId, 'mines', p.amount, minesMultiplier(d.mines, d.revealed.length), d, seed, now, p.id);
+    const out = await finish(userId, 'mines', p.amount, minesMultiplier(d.mines, d.revealed.length), d, seed, now, p.id);
     return { positions: d.positions, ...out };
   });
 }
 
 // What a player sees about their recent games (mine positions only after the game ends).
-function recentPlays(userId, limit = 30) {
-  return db.prepare("SELECT id, game, amount, payout, multiplier, status, detail, server_hash, client_seed, nonce, created_at FROM plays WHERE user_id = ? AND status != 'active' ORDER BY id DESC LIMIT ?")
-    .all(userId, limit).map((p) => ({ ...p, detail: JSON.parse(p.detail) }));
+async function recentPlays(userId, limit = 30) {
+  return (await db.all("SELECT id, game, amount, payout, multiplier, status, detail, server_hash, client_seed, nonce, created_at FROM plays WHERE user_id = ? AND status != 'active' ORDER BY id DESC LIMIT ?", userId, limit)).map((p) => ({ ...p, detail: JSON.parse(p.detail) }));
 }
 
 function gameConfig() {

@@ -13,51 +13,50 @@ const { db, tx } = require('./db');
 const { addLedger, getUser, GameError } = require('./game');
 const settings = require('./settings');
 
-function deposit(userId, amount, now = Date.now()) {
+async function deposit(userId, amount, now = Date.now()) {
   if (!settings.get('demoDeposits')) throw new GameError('Deposits are not enabled yet');
   if (!(amount > 0 && amount <= 100000)) throw new GameError('Amount must be between 1 and 100000');
-  if (getUser(userId).break_until > now) throw new GameError("You're on a break. Deposits are paused until it ends");
-  tx(() => {
-    db.prepare('UPDATE users SET balance = balance + ? WHERE id = ?').run(amount, userId);
-    addLedger(userId, 'deposit', amount, 'Demo deposit (virtual coins)', now);
+  if ((await getUser(userId)).break_until > now) throw new GameError("You're on a break. Deposits are paused until it ends");
+  await tx(async () => {
+    await db.run('UPDATE users SET balance = balance + ? WHERE id = ?', amount, userId);
+    await addLedger(userId, 'deposit', amount, 'Demo deposit (virtual coins)', now);
   });
 }
 
 // Takes the coins off the balance now (held), and creates a pending request.
-function withdraw(userId, amount, now = Date.now()) {
+async function withdraw(userId, amount, now = Date.now()) {
   if (!(amount > 0)) throw new GameError('Amount must be positive');
   const min = settings.get('minWithdraw');
   if (amount < min) throw new GameError(`Minimum withdrawal is ${min}`);
-  return tx(() => {
-    const user = getUser(userId);
+  return tx(async () => {
+    const user = await getUser(userId);
     if (user.balance < amount) throw new GameError('Not enough balance');
-    if (db.prepare("SELECT COUNT(*) AS n FROM withdrawals WHERE user_id = ? AND status = 'pending'").get(userId).n >= 3) {
+    if ((await db.get("SELECT COUNT(*) AS n FROM withdrawals WHERE user_id = ? AND status = 'pending'", userId)).n >= 3) {
       throw new GameError('You already have 3 pending withdrawals');
     }
-    db.prepare('UPDATE users SET balance = balance - ? WHERE id = ?').run(amount, userId);
-    const lid = addLedger(userId, 'withdraw', -amount, 'Withdrawal requested (waiting for admin)', now);
-    db.prepare('INSERT INTO withdrawals (user_id, amount, ledger_id, created_at) VALUES (?, ?, ?, ?)').run(userId, amount, lid, now);
+    await db.run('UPDATE users SET balance = balance - ? WHERE id = ?', amount, userId);
+    const lid = await addLedger(userId, 'withdraw', -amount, 'Withdrawal requested (waiting for admin)', now);
+    await db.run('INSERT INTO withdrawals (user_id, amount, ledger_id, created_at) VALUES (?, ?, ?, ?)', userId, amount, lid, now);
   });
 }
 
-function decideWithdrawal(adminId, id, approve, note = '', now = Date.now()) {
-  return tx(() => {
-    const w = db.prepare('SELECT * FROM withdrawals WHERE id = ?').get(id);
+async function decideWithdrawal(adminId, id, approve, note = '', now = Date.now()) {
+  return tx(async () => {
+    const w = await db.get('SELECT * FROM withdrawals WHERE id = ?', id);
     if (!w) throw new GameError('Withdrawal not found');
     if (w.status !== 'pending') throw new GameError('Already decided');
-    db.prepare('UPDATE withdrawals SET status = ?, admin_note = ?, decided_at = ?, decided_by = ? WHERE id = ?')
-      .run(approve ? 'approved' : 'rejected', String(note).slice(0, 200) || null, now, adminId, id);
+    await db.run('UPDATE withdrawals SET status = ?, admin_note = ?, decided_at = ?, decided_by = ? WHERE id = ?', approve ? 'approved' : 'rejected', String(note).slice(0, 200) || null, now, adminId, id);
     if (approve) {
-      db.prepare('UPDATE ledger SET note = ? WHERE id = ?').run('Withdrawal approved (virtual, nothing paid out)', w.ledger_id);
+      await db.run('UPDATE ledger SET note = ? WHERE id = ?', 'Withdrawal approved (virtual, nothing paid out)', w.ledger_id);
     } else {
-      db.prepare('UPDATE users SET balance = balance + ? WHERE id = ?').run(w.amount, w.user_id);
-      addLedger(w.user_id, 'withdraw_refund', w.amount, `Withdrawal rejected${note ? `: ${String(note).slice(0, 100)}` : ''}`, now);
+      await db.run('UPDATE users SET balance = balance + ? WHERE id = ?', w.amount, w.user_id);
+      await addLedger(w.user_id, 'withdraw_refund', w.amount, `Withdrawal rejected${note ? `: ${String(note).slice(0, 100)}` : ''}`, now);
     }
   });
 }
 
-function userWithdrawals(userId) {
-  return db.prepare('SELECT id, amount, status, admin_note, created_at, decided_at FROM withdrawals WHERE user_id = ? ORDER BY id DESC LIMIT 20').all(userId);
+async function userWithdrawals(userId) {
+  return db.all('SELECT id, amount, status, admin_note, created_at, decided_at FROM withdrawals WHERE user_id = ? ORDER BY id DESC LIMIT 20', userId);
 }
 
 module.exports = { deposit, withdraw, decideWithdrawal, userWithdrawals };

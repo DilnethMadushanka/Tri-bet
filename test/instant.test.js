@@ -1,17 +1,10 @@
-process.env.DB_PATH = ':memory:';
-process.env.CRASH_AUTOSTART = 'false';
+const { db, game, settings, user, bal, ledgerSum, close, fund, cleanup } = require('./helpers');
 const test = require('node:test');
 const assert = require('node:assert');
-const { db } = require('../src/db');
-const game = require('../src/game');
 const I = require('../src/instant');
 
-let n = 0;
-const user = () => game.registerUser({ username: `p${++n}`, passwordHash: 'x' });
-const bal = (id) => game.getUser(id).balance;
-const ledgerSum = (id) => db.prepare('SELECT SUM(amount) AS s FROM ledger WHERE user_id = ?').get(id).s;
-const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
-const fund = (id, amt) => { db.prepare('UPDATE users SET balance = balance + ? WHERE id = ?').run(amt, id); game.addLedger(id, 'deposit', amt, 'test'); };
+test.before(() => settings.load(true));
+test.after(cleanup);
 
 test('floats are deterministic and in [0, 1)', () => {
   const a = I.floats('s', 'c', 1, 20), b = I.floats('s', 'c', 1, 20);
@@ -36,69 +29,69 @@ test('every game pays back about 97% (exact maths)', () => {
   }
 });
 
-test('dice: result matches the seed, balance and ledger agree', () => {
-  const a = user();
-  const s = I.seedOf(a);
-  const r = I.playDice(a, { amount: 10, target: 50, mode: 'under' });
+test('dice: result matches the seed, balance and ledger agree', async () => {
+  const a = await user();
+  const s = await I.seedOf(a);
+  const r = await I.playDice(a, { amount: 10, target: 50, mode: 'under' });
   assert.equal(r.roll, I.diceRoll(I.floats(s.server_seed, s.client_seed, 0, 1)));
   assert.equal(r.status, r.roll < 50 ? 'won' : 'lost');
-  close(bal(a), 90 + r.payout);
-  assert.equal(I.seedOf(a).nonce, 1);
-  assert.throws(() => I.playDice(a, { amount: 10, target: 99, mode: 'under' }), /between 1% and 95%/);
-  close(bal(a), ledgerSum(a));
+  close(await bal(a), 90 + r.payout);
+  assert.equal((await I.seedOf(a)).nonce, 1);
+  await assert.rejects(I.playDice(a, { amount: 10, target: 99, mode: 'under' }), /between 1% and 95%/);
+  close(await bal(a), await ledgerSum(a));
 });
 
-test('coin flip and plinko', () => {
-  const a = user(); fund(a, 1000);
+test('coin flip and plinko', async () => {
+  const a = await user(); await fund(a, 1000);
   let wins = 0;
-  for (let i = 0; i < 40; i++) { const r = I.playFlip(a, { amount: 1, side: 'heads' }); if (r.status === 'won') { wins++; close(r.payout, 1.94); } }
+  for (let i = 0; i < 40; i++) { const r = await I.playFlip(a, { amount: 1, side: 'heads' }); if (r.status === 'won') { wins++; close(r.payout, 1.94); } }
   assert.ok(wins > 5 && wins < 35);
-  const r = I.playPlinko(a, { amount: 10, risk: 'high' });
+  const r = await I.playPlinko(a, { amount: 10, risk: 'high' });
   assert.equal(r.path.length, 12);
   assert.equal(r.slot, r.path.reduce((x, y) => x + y, 0));
   close(r.payout, Math.round(10 * I.plinkoTable('high')[r.slot] * 100) / 100);
-  close(bal(a), ledgerSum(a));
+  close(await bal(a), await ledgerSum(a));
 });
 
-test('mines: reveal safe tiles, cash out; hitting a mine loses', () => {
-  const a = user();
-  const s = I.seedOf(a);
-  I.minesStart(a, { amount: 10, mines: 3 });
-  assert.throws(() => I.minesStart(a, { amount: 10, mines: 3 }), /already/);
-  assert.throws(() => I.rotateSeed(a), /Finish/);
+test('mines: reveal safe tiles, cash out; hitting a mine loses', async () => {
+  const a = await user();
+  const s = await I.seedOf(a);
+  await I.minesStart(a, { amount: 10, mines: 3 });
+  await assert.rejects(I.minesStart(a, { amount: 10, mines: 3 }), /already/);
+  await assert.rejects(I.rotateSeed(a), /Finish/);
   const pos = I.minesPositions(I.floats(s.server_seed, s.client_seed, 0, 3), 3);
   const safe = [...Array(25).keys()].filter((t) => !pos.includes(t));
-  I.minesReveal(a, { tile: safe[0] });
-  I.minesReveal(a, { tile: safe[1] });
-  const out = I.minesCashout(a);
+  await I.minesReveal(a, { tile: safe[0] });
+  await I.minesReveal(a, { tile: safe[1] });
+  const out = await I.minesCashout(a);
   close(out.multiplier, I.minesMultiplier(3, 2));
-  close(bal(a), 90 + out.payout);
+  close(await bal(a), 90 + out.payout);
   // second game: hit a mine
-  const s2 = I.seedOf(a);
-  I.minesStart(a, { amount: 5, mines: 5 });
+  const s2 = await I.seedOf(a);
+  await I.minesStart(a, { amount: 5, mines: 5 });
   const pos2 = I.minesPositions(I.floats(s2.server_seed, s2.client_seed, 1, 5), 5);
-  const r = I.minesReveal(a, { tile: pos2[0] });
+  const r = await I.minesReveal(a, { tile: pos2[0] });
   assert.equal(r.boom, true);
-  assert.equal(I.activeMines(a), null);
-  close(bal(a), ledgerSum(a));
+  assert.equal(await I.activeMines(a), null);
+  close(await bal(a), await ledgerSum(a));
 });
 
-test('rotating the seed reveals the old one', () => {
-  const a = user();
-  const old = I.seedOf(a);
-  I.playFlip(a, { amount: 1, side: 'tails' });
-  const r = I.rotateSeed(a, 'my-seed');
+test('rotating the seed reveals the old one', async () => {
+  const a = await user();
+  const old = await I.seedOf(a);
+  await I.playFlip(a, { amount: 1, side: 'tails' });
+  const r = await I.rotateSeed(a, 'my-seed');
   assert.equal(r.revealedServerSeed, old.server_seed);
   assert.equal(I.sha256(r.revealedServerSeed), old.server_hash);
-  const now = I.seedOf(a);
+  const now = await I.seedOf(a);
   assert.equal(now.client_seed, 'my-seed');
   assert.equal(now.nonce, 0);
   assert.notEqual(now.server_hash, old.server_hash);
 });
 
-test('24-hour limit counts instant games', () => {
-  const a = user();
-  game.setPlay(a, { dailyBetLimit: 15 });
-  I.playFlip(a, { amount: 10, side: 'heads' });
-  assert.throws(() => I.playDice(a, { amount: 10, target: 50, mode: 'over' }), /24-hour/);
+test('24-hour limit counts instant games', async () => {
+  const a = await user();
+  await game.setPlay(a, { dailyBetLimit: 15 });
+  await I.playFlip(a, { amount: 10, side: 'heads' });
+  await assert.rejects(I.playDice(a, { amount: 10, target: 50, mode: 'over' }), /24-hour/);
 });

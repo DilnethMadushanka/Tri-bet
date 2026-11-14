@@ -61,6 +61,7 @@ if (demo) {
     const bt = $('#bonusTxt');
     if (bt) bt.textContent = `${fmt(cfg.signupBonus)} free ${cfg.coin}`;
     window.__cfg = cfg;
+    testModeNotice(cfg);
     if (cfg.licenseText) $('#licenseText').textContent = '· ' + cfg.licenseText;
     if (typeof onCfg === 'function') onCfg(cfg);
   } catch {}
@@ -177,4 +178,14 @@ if (regForm) {
       setBusy(false);
     }
   });
+}
+
+// Test mode (no database connected yet): data is temporary. Show a small notice.
+function testModeNotice(c) {
+  if (!c || !c.testMode || document.getElementById('testModeNote')) return;
+  const n = document.createElement('div');
+  n.id = 'testModeNote';
+  n.textContent = 'Test mode: no database yet, so accounts and coins can reset at any time';
+  n.style.cssText = 'position:fixed;top:6px;left:50%;transform:translateX(-50%);z-index:9999;pointer-events:none;background:#f5a524;color:#111;font:600 12px/1.3 system-ui,sans-serif;padding:5px 10px;border-radius:999px;max-width:calc(100% - 32px);text-align:center;opacity:.92';
+  document.body.appendChild(n);
 }

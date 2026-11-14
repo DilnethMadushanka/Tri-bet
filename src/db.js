@@ -1,15 +1,18 @@
-// Database: libSQL (SQLite-compatible).
-//   - On Vercel: a hosted Turso database. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.
+// Database. Picks one of three places for the data:
+//   - TURSO_DATABASE_URL set: a hosted Turso database (TURSO_AUTH_TOKEN too). Use this when the site goes live.
 //   - On your computer: a local file (DB_PATH, default data.sqlite). Nothing to set up.
+//   - On Vercel with no database set: TEST MODE. A file in /tmp, which is wiped whenever Vercel restarts
+//     the server (accounts, balances and bets disappear). Fine for trying the site, not for real players.
 //
 // All calls are async. Inside tx(fn), every db call made by fn (and anything it calls) runs in
 // the same write transaction, so balance changes are all-or-nothing.
-const { createClient } = require('@libsql/client');
 const { AsyncLocalStorage } = require('node:async_hooks');
 
-const url = process.env.TURSO_DATABASE_URL || `file:${process.env.DB_PATH || 'data.sqlite'}`;
-const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
+const remote = !!process.env.TURSO_DATABASE_URL;
+const testMode = !remote && !!process.env.VERCEL;
+const filePath = process.env.DB_PATH || (testMode ? '/tmp/betdouble.sqlite' : 'data.sqlite');
 const als = new AsyncLocalStorage();
+const fixArgs = (args) => args.map((a) => (a === undefined ? null : typeof a === 'boolean' ? (a ? 1 : 0) : a));
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -135,49 +138,95 @@ CREATE INDEX IF NOT EXISTS plays_user ON plays(user_id, id DESC);
 CREATE INDEX IF NOT EXISTS plays_time ON plays(created_at);
 `;
 
+// ---------- Turso (remote, over HTTPS) ----------
+function tursoBackend() {
+  const { createClient } = require('@libsql/client/web');
+  const client = createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN });
+  const plain = (rs) => rs.rows.map((row) => Object.fromEntries(rs.columns.map((c, i) => [c, row[i]])));
+  const exec = (target, sql, args) => target.execute({ sql, args: fixArgs(args) });
+  return {
+    init: () => client.executeMultiple(SCHEMA),
+    async query(sql, args) {
+      const rs = await exec(als.getStore() || client, sql, args);
+      return { rows: plain(rs), changes: rs.rowsAffected, lastId: rs.lastInsertRowid === undefined ? undefined : Number(rs.lastInsertRowid) };
+    },
+    async transaction(fn) {
+      const t = await client.transaction('write');
+      try {
+        const out = await als.run(t, fn);
+        await t.commit();
+        return out;
+      } catch (e) {
+        try { await t.rollback(); } catch {}
+        throw e;
+      } finally { t.close(); }
+    },
+  };
+}
+
+// ---------- local file (Node's built-in SQLite, no extra install) ----------
+function fileBackend() {
+  const { DatabaseSync } = require('node:sqlite');
+  const conn = new DatabaseSync(filePath);
+  conn.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
+  return {
+    init: async () => conn.exec(SCHEMA),
+    async query(sql, args) {
+      const st = conn.prepare(sql);
+      if (/^\s*(SELECT|WITH|PRAGMA)\b/i.test(sql) || /\bRETURNING\b/i.test(sql)) return { rows: st.all(...fixArgs(args)).map((r) => ({ ...r })) };
+      const r = st.run(...fixArgs(args));
+      return { rows: [], changes: Number(r.changes), lastId: Number(r.lastInsertRowid) };
+    },
+    async transaction(fn) {
+      conn.exec('BEGIN IMMEDIATE');
+      try {
+        const out = await als.run(true, fn);
+        conn.exec('COMMIT');
+        return out;
+      } catch (e) {
+        try { conn.exec('ROLLBACK'); } catch {}
+        throw e;
+      }
+    },
+  };
+}
+
+let backend = null;
+const getBackend = () => backend || (backend = remote ? tursoBackend() : fileBackend());
+
 let readyP = null;
 function ready() {
   if (!readyP) {
-    readyP = client.executeMultiple(SCHEMA).catch((e) => { readyP = null; throw e; });
+    readyP = Promise.resolve().then(() => getBackend().init()).catch((e) => { readyP = null; throw e; });
   }
   return readyP;
 }
 
-const plain = (rs) => rs.rows.map((row) => Object.fromEntries(rs.columns.map((c, i) => [c, row[i]])));
-async function exec(sql, args) {
-  await ready();
-  const target = als.getStore() || client;
-  return target.execute({ sql, args: args.map((a) => (a === undefined ? null : typeof a === 'boolean' ? (a ? 1 : 0) : a)) });
-}
-
-const db = {
-  async get(sql, ...args) { return plain(await exec(sql, args))[0]; },
-  async all(sql, ...args) { return plain(await exec(sql, args)); },
-  async run(sql, ...args) {
-    const rs = await exec(sql, args);
-    return { changes: rs.rowsAffected, lastId: rs.lastInsertRowid === undefined ? undefined : Number(rs.lastInsertRowid) };
-  },
-};
-
-// One write transaction at a time per server instance (the database also serialises writers).
+// One write transaction at a time per server instance. With the local file there is a single
+// connection, so calls made outside a transaction also wait their turn instead of slipping into one.
 let queue = Promise.resolve();
-async function tx(fn) {
-  if (als.getStore()) return fn(); // already inside one
-  await ready();
-  const run = async () => {
-    const t = await client.transaction('write');
-    try {
-      const out = await als.run(t, fn);
-      await t.commit();
-      return out;
-    } catch (e) {
-      try { await t.rollback(); } catch {}
-      throw e;
-    } finally { t.close(); }
-  };
+function serial(run) {
   const p = queue.then(run, run);
   queue = p.catch(() => {});
   return p;
 }
 
-module.exports = { db, tx, ready, client };
+async function query(sql, args) {
+  await ready();
+  if (remote || als.getStore()) return getBackend().query(sql, args);
+  return serial(() => getBackend().query(sql, args));
+}
+
+const db = {
+  async get(sql, ...args) { return (await query(sql, args)).rows[0]; },
+  async all(sql, ...args) { return (await query(sql, args)).rows; },
+  async run(sql, ...args) { const r = await query(sql, args); return { changes: r.changes, lastId: r.lastId }; },
+};
+
+async function tx(fn) {
+  if (als.getStore()) return fn(); // already inside one
+  await ready();
+  return serial(() => getBackend().transaction(fn));
+}
+
+module.exports = { db, tx, ready, testMode };

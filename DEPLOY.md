@@ -3,6 +3,13 @@
 The site runs on Vercel. The data (accounts, balances, bets) lives in a **Turso** database, because Vercel
 can't keep files between requests. Both have free plans.
 
+## Test mode (no database yet)
+
+If you deploy without the database settings, the site still runs in **test mode**: a small orange notice says so,
+and the data is kept in a temporary file on Vercel's server. It is wiped whenever Vercel restarts the server (after
+a quiet spell or a new deploy), so accounts, coins and bets can disappear and you may need to register again.
+Use it only to try the site. Connect the database before real players join.
+
 ## 1. Create the database (Turso)
 
 Easiest way, from inside Vercel:

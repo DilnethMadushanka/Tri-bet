@@ -2,7 +2,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const express = require('express');
 const cookieParser = require('cookie-parser');
-const { db, ready } = require('./db');
+const { db, ready, testMode } = require('./db');
 const config = require('./config');
 const settings = require('./settings');
 const game = require('./game');
@@ -23,9 +23,6 @@ app.use(express.static(path.join(__dirname, '..', 'public'), { extensions: ['htm
 // Errors from async handlers go to the error handler at the bottom.
 const a = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 app.use('/api', a(async (req, res, next) => {
-  if (process.env.VERCEL && !process.env.TURSO_DATABASE_URL) {
-    return res.status(503).json({ error: 'Database not set up. In Vercel, add TURSO_DATABASE_URL and TURSO_AUTH_TOKEN, then redeploy.' });
-  }
   await ready(); await settings.load(); next();
 }));
 
@@ -117,7 +114,7 @@ app.post('/api/logout', a(async (req, res) => {
 app.get('/api/config', (req, res) => {
   const s = settings.all();
   res.json({
-    brand: config.BRAND, coin: config.COIN, demoDeposits: s.demoDeposits, signupBonus: s.signupBonus, licenseText: s.licenseText,
+    brand: config.BRAND, coin: config.COIN, testMode, demoDeposits: s.demoDeposits, signupBonus: s.signupBonus, licenseText: s.licenseText,
     referralSignupBonus: s.referralSignupBonus, referralPct: s.referralPct, minWithdraw: s.minWithdraw,
     minBet: s.minBet, maxBet: s.maxBet, bettingSeconds: s.bettingSeconds, games: instant.gameConfig(), maxWin: s.maxWin, maxMultiplier: s.maxMultiplier, houseEdgePct: s.houseEdgePct,
   });

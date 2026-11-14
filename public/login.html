@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#07080f" />
+  <title>Log in · BetDouble</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="icon" href="/img/brand/favicon-32.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta property="og:title" content="BetDouble" />
+  <meta property="og:description" content="Watch it climb. Cash out before it crashes." />
+  <meta property="og:image" content="/img/brand/og-image.png" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="ap">
+  <div class="ap-wrap">
+    <aside class="ap-brand">
+      <a href="/login" class="logo big"><img class="logo-mark" src="/img/brand/logo-mark-128.png" alt="" /><span class="logo-word">Bet<span class="grad">Double</span></span></a>
+      <div class="ap-hero">
+        <h1>Welcome back.<br /><span class="grad">It's still climbing.</span></h1>
+        <p class="muted">Log in, place your bet, and cash out before it crashes.</p>
+      </div>
+      <div class="ap-demo glass" id="demoRig"></div>
+      <div class="ap-stats" id="pubStats"></div>
+    </aside>
+
+    <main class="ap-main">
+      <form id="loginForm" class="ap-card" novalidate>
+        <a href="/login" class="logo ap-mobile-logo"><img class="logo-mark" src="/img/brand/logo-mark-128.png" alt="" /><span class="logo-word">Bet<span class="grad">Double</span></span></a>
+        <h2>Log in</h2>
+        <p class="muted">Don't have an account? <a class="link" href="/register" id="toRegister">Create one</a></p>
+
+        <label class="field">
+          <span>Username or email</span>
+          <input name="username" autocomplete="username" autocapitalize="none" required />
+        </label>
+        <label class="field">
+          <span>Password</span>
+          <div class="pw">
+            <input name="password" type="password" autocomplete="current-password" required />
+            <button type="button" class="pw-eye" aria-label="Show password">Show</button>
+          </div>
+        </label>
+        <div class="ap-row">
+          <label class="check"><input type="checkbox" name="remember" checked /> Keep me logged in</label>
+          <button type="button" class="link small plain" id="forgot">Forgot password?</button>
+        </div>
+        <p class="ap-note hidden" id="forgotNote">Ask the site admin to reset your password. They can set a new one for you from the admin dashboard.</p>
+        <p id="err" class="err" role="alert"></p>
+        <button type="submit" class="btn primary block lg" id="submit">Log in</button>
+      </form>
+    </main>
+  </div>
+  <footer class="site-foot"><span class="age">18+</span> Play responsibly. Betting can lose you coins. <span id="licenseText"></span></footer>
+  <div id="toasts" class="toasts"></div>
+  <script src="/auth.js"></script>
+</body>
+</html>

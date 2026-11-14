@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#07080f" />
+  <title>BetDouble</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet" />
+  <link rel="icon" href="/img/brand/favicon-32.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta property="og:title" content="BetDouble" />
+  <meta property="og:description" content="Watch it climb. Cash out before it crashes." />
+  <meta property="og:image" content="/img/brand/og-image.png" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app" class="app hidden">
+    <aside class="side">
+      <div class="logo"><img class="logo-mark" src="/img/brand/logo-mark-128.png" alt="" /><span class="logo-word">Bet<span class="grad">Double</span></span></div>
+      <nav id="nav">
+        <a href="#games" data-page="games"><i>◫</i>All games</a>
+        <div class="nav-label">Games</div>
+        <a href="#play" data-page="play"><i>▲</i>Crash <span class="badge live-badge" id="navLive">LIVE</span></a>
+        <a href="#dice" data-page="dice"><i>⚄</i>Dice</a>
+        <a href="#mines" data-page="mines"><i>✹</i>Mines</a>
+        <a href="#plinko" data-page="plinko"><i>◉</i>Plinko</a>
+        <a href="#flip" data-page="flip"><i>◐</i>Coin Flip</a>
+        <div class="nav-label">Account</div>
+        <a href="#fair" data-page="fair"><i>✓</i>Provably fair</a>
+        <a href="#invite" data-page="invite"><i>✦</i>Invite friends</a>
+        <a href="#wallet" data-page="wallet"><i>◎</i>Wallet <span class="badge warn-badge hidden" id="navWd"></span></a>
+        <a href="/admin" class="admin-link hidden" id="navAdmin"><i>⚙</i>Admin</a>
+      </nav>
+      <div class="side-foot">
+        <div class="me"><div class="avatar" id="avatar">?</div><div><b id="username"></b><div class="muted small">Virtual coins</div></div></div>
+        <button id="logout" class="btn ghost block small">Log out</button>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="top-left">
+          <img class="logo-mark top-logo" src="/img/brand/logo-mark-128.png" alt="" />
+          <h2 id="pageTitle">All games</h2>
+        </div>
+        <div class="top-right">
+          <a href="/admin" class="icon-btn admin-mobile hidden" id="topAdmin" title="Admin">⚙</a>
+          <button id="soundBtn" class="icon-btn" title="Sound">🔊</button>
+          <a href="#wallet" class="bal-chip"><span class="muted small bal-lbl">Balance</span><b id="balance" class="mono">0.00</b><span class="coin small"></span></a>
+        </div>
+      </header>
+
+      <div id="breakBanner" class="break-banner hidden"></div>
+
+      <!-- Lobby -->
+      <section class="page" data-page="games">
+        <div class="lobby-hero glass">
+          <div>
+            <div class="tier" style="color:var(--accent2)">BetDouble originals</div>
+            <h3>Five games. One balance. All provably fair.</h3>
+            <p class="muted">Every result can be checked. The house edge is <b class="edgeN">3</b>% on every game, so on average you get back <b class="rtpN">97</b>% of what you bet.</p>
+          </div>
+          <div class="lobby-bal"><span class="muted small">Your balance</span><b class="mono" id="lobbyBal">0.00</b><a href="#wallet" class="btn ghost small">Wallet</a></div>
+        </div>
+        <div class="lobby" id="lobby">
+          <a href="#play" class="gcard g-crash"><div class="gart"><svg viewBox="0 0 200 110"><defs><linearGradient id="gc1" x1="0" x2="1"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#00e0a4"/></linearGradient></defs><path d="M10 100 C 80 98, 130 80, 180 18" fill="none" stroke="url(#gc1)" stroke-width="6" stroke-linecap="round"/><circle cx="180" cy="18" r="9" fill="#fff"/></svg><span class="glive" id="lobbyCrash">LIVE</span></div>
+            <div class="gbody"><b>Crash</b><span class="muted small">Cash out before it crashes</span></div></a>
+          <a href="#dice" class="gcard g-dice"><div class="gart"><div class="die"><i></i><i></i><i></i><i></i><i></i></div><div class="die d2"><i></i><i></i></div></div>
+            <div class="gbody"><b>Dice</b><span class="muted small">Pick your chance, up to 97x</span></div></a>
+          <a href="#mines" class="gcard g-mines"><div class="gart"><div class="mini-grid"><i class=""></i><i class="gem"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class="gem"></i><i class=""></i><i class="bomb"></i><i class=""></i><i class=""></i><i class="gem"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class="gem"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></div></div>
+            <div class="gbody"><b>Mines</b><span class="muted small">Find gems, avoid the mines</span></div></a>
+          <a href="#plinko" class="gcard g-plinko"><div class="gart"><svg viewBox="0 0 200 110" class="pl-art"></svg></div>
+            <div class="gbody"><b>Plinko</b><span class="muted small">Drop the ball, up to <span id="plMaxTxt">157</span>x</span></div></a>
+          <a href="#flip" class="gcard g-flip"><div class="gart"><div class="coin-art">▲</div></div>
+            <div class="gbody"><b>Coin Flip</b><span class="muted small">Heads or tails, double up</span></div></a>
+        </div>
+      </section>
+
+      <!-- Dice -->
+      <section class="page" data-page="dice">
+        <div class="ig-grid">
+          <div class="glass ig-board dice-board">
+            <div class="dice-result mono" id="diceResult">50.00</div>
+            <div class="dice-track" id="diceTrack">
+              <div class="dt-fill" id="diceFill"></div>
+              <div class="dt-marker hidden" id="diceMarker"><span id="diceMarkerTxt">0</span></div>
+              <input type="range" id="diceTarget" min="1" max="98.99" step="0.01" value="50" />
+            </div>
+            <div class="dt-scale muted small"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+            <div class="dice-info">
+              <label><span class="muted small">Roll</span>
+                <div class="seg mini" id="diceMode"><button data-m="under" class="active">Under</button><button data-m="over">Over</button></div></label>
+              <label><span class="muted small">Target</span><input id="diceTargetIn" type="number" step="0.01" class="mono" /></label>
+              <label><span class="muted small">Win chance</span><input id="diceChance" type="number" step="0.01" class="mono" /></label>
+              <label><span class="muted small">Multiplier</span><input id="diceMult" class="mono" readonly /></label>
+            </div>
+          </div>
+          <div class="glass ig-ctrl">
+            <div class="amt-slot" data-game="dice"></div>
+            <div class="win-line"><span class="muted small">Win</span><b class="mono good" id="diceWin">0.00</b></div>
+            <button class="bet-btn go" id="diceBtn"><span class="bb-main">ROLL</span><span class="bb-sub">Space bar works too</span></button>
+          </div>
+        </div>
+        <div class="glass panel recent-panel"><div class="panel-head"><h3>Your recent rolls</h3></div><div class="recent-strip" data-recent="dice"></div></div>
+      </section>
+
+      <!-- Mines -->
+      <section class="page" data-page="mines">
+        <div class="ig-grid">
+          <div class="glass ig-board mines-board">
+            <div class="mines-grid" id="minesGrid"></div>
+          </div>
+          <div class="glass ig-ctrl">
+            <div class="amt-slot" data-game="mines"></div>
+            <label class="field"><span>Mines</span>
+              <select id="minesCount"></select></label>
+            <div class="mines-stats">
+              <div><span class="muted small">Gems found</span><b class="mono" id="mGems">0</b></div>
+              <div><span class="muted small">Now</span><b class="mono good" id="mNow">1.00x</b></div>
+              <div><span class="muted small">Next tile</span><b class="mono" id="mNext">-</b></div>
+            </div>
+            <button class="bet-btn go" id="minesBtn"><span class="bb-main" id="minesMain">BET</span><span class="bb-sub mono" id="minesSub"></span></button>
+            <button class="btn ghost block small" id="minesRandom" disabled>Open a random tile</button>
+          </div>
+        </div>
+        <div class="glass panel recent-panel"><div class="panel-head"><h3>Your recent games</h3></div><div class="recent-strip" data-recent="mines"></div></div>
+      </section>
+
+      <!-- Plinko -->
+      <section class="page" data-page="plinko">
+        <div class="ig-grid">
+          <div class="glass ig-board plinko-board">
+            <canvas id="plinkoCv"></canvas>
+          </div>
+          <div class="glass ig-ctrl">
+            <div class="amt-slot" data-game="plinko"></div>
+            <label class="field"><span>Risk</span></label>
+            <div class="seg mini seg3 risk-seg" id="plinkoRisk"><button data-r="low">Low</button><button data-r="medium" class="active">Medium</button><button data-r="high">High</button></div>
+            <button class="bet-btn go" id="plinkoBtn"><span class="bb-main">DROP</span><span class="bb-sub">You can drop many balls</span></button>
+          </div>
+        </div>
+        <div class="glass panel recent-panel"><div class="panel-head"><h3>Your recent drops</h3></div><div class="recent-strip" data-recent="plinko"></div></div>
+      </section>
+
+      <!-- Coin flip -->
+      <section class="page" data-page="flip">
+        <div class="ig-grid">
+          <div class="glass ig-board flip-board">
+            <div class="coin-wrap"><div class="flipcoin" id="coin"><div class="face heads">▲<small>HEADS</small></div><div class="face tails">◆<small>TAILS</small></div></div></div>
+            <div class="flip-msg" id="flipMsg">Pick a side and flip</div>
+          </div>
+          <div class="glass ig-ctrl">
+            <div class="amt-slot" data-game="flip"></div>
+            <div class="side-pick" id="sidePick"><button data-s="heads" class="active">▲ Heads</button><button data-s="tails">◆ Tails</button></div>
+            <div class="win-line"><span class="muted small">Win</span><b class="mono good" id="flipWin">0.00</b> <span class="muted small" id="flipMultTxt">(1.94x)</span></div>
+            <button class="bet-btn go" id="flipBtn"><span class="bb-main">FLIP</span><span class="bb-sub">50 / 50</span></button>
+          </div>
+        </div>
+        <div class="glass panel recent-panel"><div class="panel-head"><h3>Your recent flips</h3></div><div class="recent-strip" data-recent="flip"></div></div>
+      </section>
+
+      <!-- Play -->
+      <section class="page" data-page="play">
+        <div class="hist-strip" id="histStrip"></div>
+        <div class="play-grid">
+          <div class="play-main">
+            <div class="stage glass" id="stage">
+              <canvas id="stageCanvas"></canvas>
+              <div class="stage-center">
+                <div class="stage-mult mono" id="stageMult">1.00x</div>
+                <div class="stage-sub" id="stageSub">Connecting…</div>
+                <div class="stage-bar hidden" id="stageBar"><div id="stageBarFill"></div></div>
+              </div>
+              <div class="stage-foot">
+                <span class="muted small">Round <b id="roundId">#-</b></span>
+                <button class="link small plain" id="hashBtn" title="Provably fair">🔒 <span id="roundHash" class="mono">-</span></button>
+                <span class="muted small stage-players"><b id="playerCount">0</b> playing · <b id="totalBet" class="mono">0</b></span>
+              </div>
+            </div>
+
+            <div class="betbox glass">
+              <div class="bet-left">
+                <div class="bet-label"><span>Bet amount</span><span class="muted small" id="betLimits"></span></div>
+                <div class="amt-row">
+                  <button class="step" data-step="-1" aria-label="Less">−</button>
+                  <input id="betAmount" type="number" inputmode="decimal" min="1" step="1" value="10" />
+                  <button class="step" data-step="1" aria-label="More">+</button>
+                </div>
+                <div class="quick-amts">
+                  <button data-q="half">½</button><button data-q="double">2×</button>
+                  <button data-q="10">10</button><button data-q="50">50</button><button data-q="100">100</button><button data-q="max">Max</button>
+                </div>
+                <label class="auto-row">
+                  <span class="switch"><input type="checkbox" id="autoOn" /><i></i></span>
+                  <span>Auto cash-out at</span>
+                  <span class="auto-in"><input id="autoAt" type="number" inputmode="decimal" min="1.01" step="0.01" value="2.00" /><em>x</em></span>
+                </label>
+              </div>
+              <button class="bet-btn" id="betBtn" disabled>
+                <span class="bb-main" id="betMain">BET</span>
+                <span class="bb-sub mono" id="betSub"></span>
+              </button>
+            </div>
+
+            <div class="mystats">
+              <div><span class="muted small">Bets</span><b class="mono" id="msBets">0</b></div>
+              <div><span class="muted small">Wagered</span><b class="mono" id="msWagered">0</b></div>
+              <div><span class="muted small">Won</span><b class="mono" id="msWon">0</b></div>
+              <div><span class="muted small">Best cash-out</span><b class="mono good" id="msBest">-</b></div>
+            </div>
+          </div>
+
+          <div class="glass panel bets-panel">
+            <div class="seg mini" id="betsTabs"><button data-t="round" class="active">This round</button><button data-t="mine">My bets</button></div>
+            <div class="bets-head muted small"><span>Player</span><span>Bet</span><span>Cash-out</span><span>Win</span></div>
+            <div id="betsList" class="bets-list"></div>
+          </div>
+        </div>
+        <p class="muted small rules">How to play: place a bet before the round starts. The multiplier climbs from 1.00x. Press <b>Cash out</b> before it crashes to win your bet × the multiplier. If it crashes first, the bet is lost. The house edge is <span id="edgeTxt">3</span>%, so on average you get back <span id="rtpTxt">97</span>% of what you bet. Over time, the house wins.</p>
+      </section>
+
+      <!-- Provably fair -->
+      <section class="page" data-page="fair">
+        <div class="glass panel how">
+          <h3>Provably fair</h3>
+          <ol>
+            <li>Before each round, the server picks a secret random <b>seed</b> and decides the crash point from it.</li>
+            <li>It shows you the <b>hash</b> of the seed (SHA-256) before anyone bets. The hash locks in the result, but you can't work out the result from it.</li>
+            <li>After the crash, the seed is revealed. Check that <span class="mono">sha256(seed)</span> matches the hash you saw, and that the seed gives the same crash point.</li>
+          </ol>
+          <p class="muted small">Crash point formula: <span class="mono">h = HMAC_SHA256(key = seed, "betdouble")</span>, <span class="mono">x = first 13 hex digits of h / 2^52</span>, <span class="mono">crash = max(1, floor((100 − edge) / (1 − x)) / 100)</span>.</p>
+        </div>
+        <div class="glass panel verify">
+          <h3>Check a round</h3>
+          <div class="verify-grid">
+            <label class="field"><span>Seed</span><input id="vSeed" class="mono" placeholder="Paste a revealed seed" /></label>
+            <label class="field"><span>House edge %</span><input id="vEdge" type="number" step="any" value="3" /></label>
+          </div>
+          <div class="verify-out" id="vOut"><span class="muted">Pick a round below or paste a seed.</span></div>
+        </div>
+        <div class="glass panel tbl-panel">
+          <h3 style="padding-top:12px">Crash rounds</h3>
+          <table class="tbl" id="fairTbl"><thead><tr><th>Round</th><th>Crash</th><th>Players</th><th>Hash</th><th>Seed</th><th></th></tr></thead><tbody></tbody></table>
+        </div>
+        <div class="glass panel seeds-panel">
+          <h3>Dice, Mines, Plinko and Coin Flip</h3>
+          <p class="muted small">These games use your own seed pair. Each result is <span class="mono">HMAC_SHA256(server seed, "client seed:nonce:cursor")</span>, read 4 bytes at a time as numbers between 0 and 1. The nonce goes up by one with every bet. Change your seed to reveal the old server seed and check every bet you made with it.</p>
+          <div class="seed-grid">
+            <div class="kv"><span>Server seed hash (current)</span><b class="mono brk" id="seedHash">-</b></div>
+            <div class="kv"><span>Next nonce</span><b class="mono" id="seedNonce">0</b></div>
+          </div>
+          <div class="row" style="margin-top:10px"><input id="clientSeed" class="mono" placeholder="Your client seed" style="flex:1;min-width:180px" /><button class="btn primary" id="rotateSeed">Change seed &amp; reveal old one</button></div>
+          <h4 class="sub-h">Revealed seeds</h4>
+          <div id="revealedSeeds" class="activity"></div>
+          <h4 class="sub-h">Check a bet</h4>
+          <div class="verify-grid4">
+            <label class="field"><span>Game</span><select id="v2Game"><option value="dice">Dice</option><option value="flip">Coin Flip</option><option value="plinko">Plinko</option><option value="mines">Mines</option></select></label>
+            <label class="field"><span>Server seed</span><input id="v2Server" class="mono" /></label>
+            <label class="field"><span>Client seed</span><input id="v2Client" class="mono" /></label>
+            <label class="field"><span>Nonce</span><input id="v2Nonce" type="number" min="0" value="0" /></label>
+            <label class="field"><span>Mines (for Mines)</span><input id="v2Mines" type="number" min="1" max="24" value="3" /></label>
+          </div>
+          <div class="verify-out" id="v2Out"><span class="muted">Fill in a revealed server seed to see the result.</span></div>
+        </div>
+      </section>
+
+
+      <!-- Invite -->
+      <section class="page" data-page="invite">
+        <div class="glass panel invite-hero">
+          <div class="invite-copy">
+            <div class="tier" style="color:var(--good)">Referral program</div>
+            <h3>Invite friends, earn <span class="grad" id="refPct">0.5%</span> of every bet they play</h3>
+            <p class="muted" id="refExplain"></p>
+          </div>
+          <div class="invite-box">
+            <span class="muted small">Your invite link</span>
+            <div class="copy-row"><input id="refLink" readonly /><button class="btn primary" id="copyLink">Copy</button></div>
+            <div class="row">
+              <span class="muted small">Code</span><b class="mono" id="refCode">-</b>
+              <button class="btn ghost small" id="copyCode">Copy code</button>
+              <button class="btn ghost small" id="shareLink">Share…</button>
+              <a class="btn ghost small" id="waShare" target="_blank" rel="noopener">WhatsApp</a>
+            </div>
+          </div>
+        </div>
+        <div class="stats ref-stats">
+          <div class="stat"><div class="stat-ic c1">👥</div><div><div class="label">Friends joined</div><div class="value" id="refCount">0</div></div></div>
+          <div class="stat"><div class="stat-ic c3">▲</div><div><div class="label">Have played</div><div class="value" id="refActive">0</div></div></div>
+          <div class="stat"><div class="stat-ic c2">✦</div><div><div class="label">You earned</div><div class="value good" id="refEarned">0</div></div></div>
+        </div>
+        <div class="glass panel">
+          <div class="panel-head"><h3>Your referrals</h3></div>
+          <div id="refList" class="activity"></div>
+        </div>
+        <p class="muted small">One level only: you earn from people you invite, not from people they invite.</p>
+      </section>
+
+      <!-- Wallet -->
+      <section class="page" data-page="wallet">
+        <div class="wallet-grid">
+          <div class="glass panel">
+            <h3>Add or withdraw coins</h3>
+            <p class="muted small" id="walletNote"></p>
+            <div class="chips" id="chips">
+              <button type="button" data-amt="100">100</button><button type="button" data-amt="500">500</button>
+              <button type="button" data-amt="2000">2,000</button><button type="button" data-amt="10000">10,000</button>
+            </div>
+            <form id="walletForm">
+              <input name="amount" type="number" min="1" step="1" placeholder="Amount" required />
+              <div class="row">
+                <button type="submit" data-action="deposit" class="btn primary">Add coins</button>
+                <button type="submit" data-action="withdraw" class="btn ghost">Withdraw</button>
+              </div>
+            </form>
+            <p id="walletErr" class="err"></p>
+            <div class="rg">
+              <h3>Responsible play</h3>
+              <p class="muted small">Set a 24-hour bet limit, or take a break. During a break you can't bet or add coins.</p>
+              <p class="muted small" id="usedTxt"></p>
+              <div class="row"><input id="limitInput" type="number" min="0" step="any" placeholder="24h bet limit (0 = none)" style="flex:1" /><button class="btn ghost" id="limitSave">Save limit</button></div>
+              <div class="row" style="margin-top:8px"><span class="muted small" style="align-self:center">Take a break:</span>
+                <button class="btn ghost small" data-break="1">1 day</button><button class="btn ghost small" data-break="7">7 days</button><button class="btn ghost small" data-break="30">30 days</button></div>
+            </div>
+            <div id="wdBox" class="hidden">
+              <h3 style="margin-top:12px">Withdrawal requests</h3>
+              <div id="wdList" class="activity"></div>
+            </div>
+          </div>
+          <div class="glass panel">
+            <div class="panel-head">
+              <h3>History</h3>
+              <select id="ledgerFilter">
+                <option value="">All</option><option value="bet">Bets</option><option value="win">Wins</option><option value="bet_refund">Refunds</option>
+                <option value="referral_bonus">Referral</option><option value="deposit">Deposit</option><option value="withdraw">Withdraw</option>
+              </select>
+            </div>
+            <div id="ledger" class="activity"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <nav class="tabbar t5" id="tabbar">
+      <a href="#games" data-page="games"><i>◫</i>Games</a>
+      <a href="#play" data-page="play"><i>▲</i>Crash</a>
+      <a href="#fair" data-page="fair"><i>✓</i>Fair</a>
+      <a href="#invite" data-page="invite"><i>✦</i>Invite</a>
+      <a href="#wallet" data-page="wallet"><i>◎</i>Wallet</a>
+    </nav>
+  </div>
+
+  <footer class="site-foot"><span class="age">18+</span> Play responsibly. Betting can lose you coins. <span id="licenseText"></span></footer>
+  <div id="toasts" class="toasts"></div>
+  <script src="/app.js"></script>
+  <script src="/games.js"></script>
+</body>
+</html>

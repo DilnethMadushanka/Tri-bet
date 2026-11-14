@@ -1,0 +1,20 @@
+{
+  "name": "betdouble",
+  "version": "1.0.0",
+  "description": "BetDouble games (virtual coins)",
+  "engines": { "node": ">=22.5" },
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node --no-warnings src/server.js",
+    "dev": "node --no-warnings --watch src/server.js",
+    "test": "node --no-warnings --test test/*.test.js",
+    "make-admin": "node --no-warnings scripts/make-admin.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^4.22.3"
+  }
+}

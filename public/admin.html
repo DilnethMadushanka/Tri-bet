@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#07080f" />
+  <title>Admin · BetDouble</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+  <link rel="icon" href="/img/brand/favicon-32.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta property="og:title" content="BetDouble" />
+  <meta property="og:description" content="Watch it climb. Cash out before it crashes." />
+  <meta property="og:image" content="/img/brand/og-image.png" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app" class="app hidden">
+    <aside class="side">
+      <div class="logo"><img class="logo-mark" src="/img/brand/logo-mark-128.png" alt="" /><span class="logo-word">Bet<span class="grad">Double</span></span> <span class="admin-tag">ADMIN</span></div>
+      <nav id="nav">
+        <a href="#overview" data-page="overview"><i>◧</i>Overview</a>
+        <a href="#users" data-page="users"><i>👥</i>Users</a>
+        <a href="#rounds" data-page="rounds"><i>▲</i>Games &amp; bets</a>
+        <a href="#withdrawals" data-page="withdrawals"><i>↗</i>Withdrawals <span class="badge warn-badge hidden" id="navWd"></span></a>
+        <a href="#settings" data-page="settings"><i>⚙</i>Settings</a>
+      </nav>
+      <div class="side-foot">
+        <a href="/" class="btn ghost block small">← Back to the game</a>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <h2 id="pageTitle">Overview</h2>
+        <div class="top-right">
+          <button class="icon-btn" id="reload" title="Refresh">↻</button>
+          <a href="/" class="icon-btn" title="Back to app">⌂</a>
+        </div>
+      </header>
+
+      <!-- Overview -->
+      <section class="page" data-page="overview">
+        <div class="glass panel live-admin" id="liveAdmin"></div>
+        <div class="stats" id="ovStats"></div>
+        <div class="dash-grid">
+          <div class="glass panel">
+            <div class="panel-head"><h3>Last 14 days</h3>
+              <div class="seg mini seg3" id="ovSeg"><button data-k="profit" class="active">House profit</button><button data-k="wagered">Wagered</button><button data-k="signups">Sign-ups</button></div></div>
+            <div class="chart-wrap"><canvas id="ovChart"></canvas></div>
+          </div>
+          <div class="glass panel">
+            <div class="panel-head"><h3>House edge check</h3></div>
+            <div id="ovEdge"></div>
+          </div>
+        </div>
+        <div class="glass panel tbl-panel" style="margin-bottom:16px">
+          <div class="panel-head" style="padding-top:10px"><h3>By game</h3></div>
+          <table class="tbl" id="byGameTbl"><thead><tr><th>Game</th><th>Bets</th><th>Wagered</th><th>Paid out</th><th>House profit</th><th>Payout %</th></tr></thead><tbody></tbody></table>
+        </div>
+        <div class="stats" id="ovMoney"></div>
+      </section>
+
+      <!-- Users -->
+      <section class="page" data-page="users">
+        <div class="toolbar">
+          <input id="userSearch" placeholder="Search username, email or invite code…" />
+        </div>
+        <div class="glass panel tbl-panel">
+          <table class="tbl" id="usersTbl">
+            <thead><tr><th>User</th><th>Balance</th><th>Bets</th><th>House result</th><th>Referrals</th><th>Joined</th><th>Last seen</th><th>Status</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Rounds -->
+      <section class="page" data-page="rounds">
+        <div class="toolbar chips-row" id="rbTabs">
+          <button data-s="rounds" class="active">Crash rounds</button><button data-s="bets">Crash bets</button><button data-s="big">Big crash bets (100+)</button>
+          <button data-s="plays">Dice, Mines, Plinko, Flip</button>
+        </div>
+        <div class="glass panel tbl-panel" id="roundsBox">
+          <table class="tbl" id="roundsTbl">
+            <thead><tr><th>Round</th><th>Crash</th><th>Ended</th><th>Players</th><th>Bet</th><th>Paid</th><th>House</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="glass panel tbl-panel hidden" id="betsBox">
+          <table class="tbl" id="betsTbl">
+            <thead><tr><th>Player</th><th>Round</th><th>Bet</th><th>Auto</th><th>Cash-out</th><th>Payout</th><th>Result</th><th>When</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="glass panel tbl-panel hidden" id="playsBox">
+          <div class="toolbar chips-row" id="playFilter" style="margin:10px 0">
+            <button data-g="" class="active">All</button><button data-g="dice">Dice</button><button data-g="mines">Mines</button><button data-g="plinko">Plinko</button><button data-g="flip">Coin Flip</button>
+          </div>
+          <table class="tbl" id="playsTbl">
+            <thead><tr><th>Player</th><th>Game</th><th>Bet</th><th>Multiplier</th><th>Payout</th><th>Result</th><th>When</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Withdrawals -->
+      <section class="page" data-page="withdrawals">
+        <div class="toolbar chips-row" id="wdFilter">
+          <button data-s="pending" class="active">Pending</button><button data-s="approved">Approved</button><button data-s="rejected">Rejected</button>
+        </div>
+        <p class="muted small">Coins are virtual. Approving only marks the request done; nothing is paid out.</p>
+        <div class="glass panel tbl-panel">
+          <table class="tbl" id="wdTbl">
+            <thead><tr><th>User</th><th>Amount</th><th>Requested</th><th>Balance now</th><th>Note</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Settings -->
+      <section class="page" data-page="settings">
+        <form id="genForm" class="glass panel">
+          <div class="panel-head"><h3>Crash game</h3><button class="btn primary small" type="submit">Save</button></div>
+          <label class="check pause-check"><input type="checkbox" name="gamePaused" /> <b>Pause the game</b> (the current round finishes, then no new rounds start)</label>
+          <div class="form-grid">
+            <label class="field"><span>House edge %</span><input name="houseEdgePct" type="number" min="0" max="20" step="any" /></label>
+            <label class="field"><span>Minimum bet</span><input name="minBet" type="number" min="0.01" step="any" /></label>
+            <label class="field"><span>Maximum bet</span><input name="maxBet" type="number" min="0.01" step="any" /></label>
+            <label class="field"><span>Maximum win per bet</span><input name="maxWin" type="number" min="1" step="any" /></label>
+            <label class="field"><span>Highest multiplier</span><input name="maxMultiplier" type="number" min="2" step="any" /></label>
+            <label class="field"><span>Betting time (seconds)</span><input name="bettingSeconds" type="number" min="3" max="60" step="1" /></label>
+            <label class="field"><span>Pause after crash (seconds)</span><input name="pauseSeconds" type="number" min="1" max="30" step="1" /></label>
+          </div>
+          <p class="muted small" id="edgeHelp"></p>
+          <h4 class="sub-h">Accounts &amp; referrals</h4>
+          <div class="form-grid">
+            <label class="field"><span>Welcome bonus</span><input name="signupBonus" type="number" min="0" step="any" /></label>
+            <label class="field"><span>Invite bonus (new user)</span><input name="referralSignupBonus" type="number" min="0" step="any" /></label>
+            <label class="field"><span>Referral reward (% of each bet)</span><input name="referralPct" type="number" min="0" max="5" step="any" /></label>
+            <label class="field"><span>Minimum withdrawal</span><input name="minWithdraw" type="number" min="0" step="any" /></label>
+            <label class="check"><input type="checkbox" name="demoDeposits" /> Allow free demo deposits ("Add coins" button)</label>
+          </div>
+          <label class="field"><span>Licence text (shown in the footer)</span><input name="licenseText" placeholder="e.g. BetDouble · Licence No. ..." /></label>
+        </form>
+      </section>
+    </div>
+
+    <nav class="tabbar" id="tabbar">
+      <a href="#overview" data-page="overview"><i>◧</i>Overview</a>
+      <a href="#users" data-page="users"><i>👥</i>Users</a>
+      <a href="#rounds" data-page="rounds"><i>▲</i>Rounds</a>
+      <a href="#withdrawals" data-page="withdrawals"><i>↗</i>Payouts</a>
+      <a href="#settings" data-page="settings"><i>⚙</i>Settings</a>
+    </nav>
+  </div>
+
+  <!-- User drawer -->
+  <div id="drawer" class="drawer hidden" aria-modal="true" role="dialog">
+    <div class="drawer-bg" data-close></div>
+    <div class="drawer-panel">
+      <button class="icon-btn drawer-x" data-close>✕</button>
+      <div id="drawerBody"></div>
+    </div>
+  </div>
+
+  <div id="denied" class="denied hidden glass panel">
+    <h3>Admins only</h3>
+    <p class="muted">Your account doesn't have admin access.</p>
+    <a href="/" class="btn primary">Back to the game</a>
+  </div>
+
+  <div id="toasts" class="toasts"></div>
+  <script src="/admin.js"></script>
+</body>
+</html>

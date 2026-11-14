@@ -1,40 +1,61 @@
-# Putting BetDouble online
+# Put BetDouble online with Vercel
 
-BetDouble needs a server that **stays on** (Crash rounds run all the time) and a **disk** (the database is one SQLite file).
-That's why it runs on Render or Railway, not Vercel: Vercel stops the server between requests and wipes files.
+The site runs on Vercel. The data (accounts, balances, bets) lives in a **Turso** database, because Vercel
+can't keep files between requests. Both have free plans.
 
-First put the code on GitHub: unzip `betdouble.tar.gz`, create a new GitHub repository, and upload the `betdouble` folder.
+## 1. Create the database (Turso)
 
-## Option A: Render (about $7/month)
+Easiest way, from inside Vercel:
 
-1. Sign in at render.com with GitHub.
-2. Click **New → Blueprint** and pick your BetDouble repository. Render reads `render.yaml`.
-3. When asked, type your admin username for `ADMIN_USERNAME` (e.g. `dilneth`), then **Apply**.
-4. Wait for "Live". Open the `https://betdouble-xxxx.onrender.com` link and register with that username. You are the admin.
+1. Open your project on vercel.com → **Storage** → **Create Database** → pick **Turso** (under Marketplace).
+2. Choose the free plan and a region close to your players (for Sri Lanka: Mumbai, `bom1`, if offered, or Singapore).
+3. Connect it to the project. Vercel adds `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for you.
 
-## Option B: Railway (about $5/month)
+Or by hand at [turso.tech](https://turso.tech):
 
-1. Sign in at railway.app with GitHub, click **New Project → Deploy from GitHub repo** and pick the repository. Railway uses the `Dockerfile`.
-2. In the service, open **Settings → Volumes → Add volume**, mount path `/data`.
-3. In **Variables**, add `ADMIN_USERNAME` = your username.
-4. In **Settings → Networking**, click **Generate domain**. Open it and register with that username.
+1. Sign up, create a database, and copy its URL (starts with `libsql://`).
+2. Create a token for it.
+3. In Vercel: **Settings → Environment Variables**, add:
 
-## Your own domain (e.g. betdouble.lk)
+| Name | Value |
+| --- | --- |
+| `TURSO_DATABASE_URL` | `libsql://your-db-name-yourname.turso.io` |
+| `TURSO_AUTH_TOKEN` | the token |
 
-Both have **Settings → Custom domain**. Add the domain there, then add the DNS record they show you at your domain seller. HTTPS is automatic.
+The tables are created automatically the first time the site runs.
 
-## Settings you can set (environment variables)
+## 2. Optional settings
 
 | Name | What it does |
-|---|---|
-| `ADMIN_USERNAME` | This username becomes admin when it registers. |
-| `DB_PATH` | Where the database file lives. Must be on the disk/volume. |
-| `DEMO_DEPOSITS` | `false` hides the free "Add coins" button. |
+| --- | --- |
+| `ADMIN_USERNAME` | This username becomes admin when it registers. Otherwise the first account to register is the admin. |
 
-## Backups
+## 3. Deploy
 
-All data is in the one file at `DB_PATH`. Download a copy from the disk regularly (Render: Shell tab; Railway: volume backups).
+- Framework preset: **Express** (Vercel finds `src/server.js`). Leave build and output settings empty.
+- After adding the variables, go to **Deployments**, open the latest one, and press **Redeploy**.
+- Every push to `main` on GitHub deploys again automatically.
 
-## Before real money
+Then open the site, register (you become admin), and open `/admin`.
 
-Coins are virtual. Before taking real money: connect a payment provider approved for licensed online gaming in Sri Lanka (`src/payments.js`), add ID and age checks (KYC), and set `DEMO_DEPOSITS=false`.
+## Good to know
+
+- **No always-on server.** The crash game moves forward whenever someone has the page open. If nobody is
+  playing, no rounds run, and the next visitor starts a fresh round.
+- **Requests.** An open Crash page asks the server for the game state about twice a second during a flight and
+  every 1–2 seconds otherwise (it stops while the tab is hidden). The free Vercel plan includes a fixed number of
+  function calls each month, so with many players at once you will need a paid plan. Check usage under
+  **Usage** in Vercel.
+- **Region.** In Vercel **Settings → Functions**, set the function region next to the database region so each
+  request is fast.
+- **Coins are virtual.** Real money needs a payment provider approved for licensed online gaming in Sri Lanka,
+  connected in `src/payments.js`, plus KYC and age checks.
+
+## Run on your own computer
+
+```
+npm install
+npm start        # http://localhost:3000, data in data.sqlite
+```
+
+`render.yaml` and `Dockerfile` still work for hosts with an always-on server (Render, Railway, a VPS).

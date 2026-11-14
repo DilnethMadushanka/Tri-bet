@@ -2,7 +2,9 @@
   "name": "betdouble",
   "version": "1.0.0",
   "description": "BetDouble games (virtual coins)",
-  "engines": { "node": ">=22.5" },
+  "engines": {
+    "node": ">=22.5"
+  },
   "main": "src/server.js",
   "scripts": {
     "start": "node --no-warnings src/server.js",
@@ -14,6 +16,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@libsql/client": "^0.14.0",
     "cookie-parser": "^1.4.7",
     "express": "^4.22.3"
   }

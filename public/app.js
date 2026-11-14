@@ -99,33 +99,67 @@ async function act(path, body, okMsg) {
 }
 
 // ---------- live game feed ----------
-let es = null, lastMsg = 0;
-function connect() {
-  if (es) es.close();
-  es = new EventSource('/api/crash/stream');
-  es.onmessage = (m) => { lastMsg = Date.now(); onEvent(JSON.parse(m.data)); };
-  es.onerror = () => { $('stageSub').textContent = 'Reconnecting…'; };
+// The server has no always-on process, so the page asks for the game state on a timer.
+// Faster while the plane flies, slower otherwise, and paused while the tab is hidden.
+let pollT = null, polling = false, failCount = 0;
+function schedulePoll(ms) { clearTimeout(pollT); pollT = setTimeout(poll, ms); }
+async function poll() {
+  if (polling) return;
+  if (document.hidden) return schedulePoll(3000);
+  polling = true;
+  try {
+    const r = await fetch('/api/crash/state', { credentials: 'same-origin', cache: 'no-store' });
+    if (!r.ok) throw new Error('bad status');
+    failCount = 0;
+    onLive(await r.json());
+  } catch {
+    failCount++;
+    $('stageSub').textContent = 'Reconnecting…';
+  } finally {
+    polling = false;
+  }
+  schedulePoll(nextPollDelay());
 }
-setInterval(() => { if (Date.now() - lastMsg > 12000) connect(); }, 4000); // watchdog
+function nextPollDelay() {
+  if (failCount) return Math.min(10000, 1000 * failCount);
+  const r = live && live.round;
+  if (!r) return 2000;
+  const now = Date.now() + clockOffset;
+  if (r.status === 'running') return 500;
+  // Wake just after the next known change (flight starts, next round opens), or every 2s.
+  const next = r.status === 'betting' ? r.bettingEndsAt : r.nextAt;
+  if (next && next > now) return Math.max(150, Math.min(2000, next - now + 60));
+  return 2000;
+}
+const connect = () => schedulePoll(0);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) schedulePoll(0); });
 
-function onEvent(ev) {
+function onLive(state) {
   const prevRound = live?.round?.id;
-  live = ev.state;
+  const prevStatus = live?.round?.status;
+  const prevMine = myBet && myBet.roundId === state.round?.id ? myBet.status : null;
+  live = state;
   clockOffset = live.serverNow - Date.now();
   const r = live.round;
   if (r && r.id !== prevRound) { // a new round
     myBet = null;
     crashedShownFor = null;
   }
-  if (ev.type === 'betting' && queued) { const q = queued; queued = null; placeBet(q); }
-  if (ev.type === 'cashout' && st && ev.username === st.user.username) {
-    if (myBet) Object.assign(myBet, { status: 'won', cashoutAt: ev.multiplier, payout: ev.payout });
-    toast(`You cashed out at ${xs(ev.multiplier)}: +${fmt(ev.payout)} ${cfg.coin}`, 'good');
-    ding(880);
-    refreshSoon();
+  if (state.me !== undefined) {
+    const me = state.me && r && state.me.roundId === r.id ? state.me : null;
+    if (me && prevMine === 'active' && me.status === 'won') {
+      toast(`You cashed out at ${xs(me.cashoutAt)}: +${fmt(me.payout)} ${cfg.coin}`, 'good');
+      ding(880);
+      refreshSoon();
+    }
+    myBet = me;
+    if (st && typeof state.balance === 'number' && state.balance !== st.user.balance) {
+      st.user.balance = state.balance;
+      $('balance').textContent = fmt(state.balance); $('lobbyBal').textContent = fmt(state.balance);
+    }
   }
-  if (ev.type === 'crashed') {
-    if (myBet && myBet.status === 'active') { myBet.status = 'lost'; }
+  if (r && r.status === 'betting' && queued && st) { const q = queued; queued = null; placeBet(q); }
+  if (r && r.status === 'crashed' && prevStatus !== 'crashed' && prevRound === r.id) {
     if (myBet) refreshSoon();
     boom();
   }
@@ -316,7 +350,10 @@ $('betBtn').addEventListener('click', async () => {
   if (mode === 'cancel') return act('/api/bet/cancel', {}, 'Bet cancelled');
   if (mode === 'cashout') {
     $('betBtn').disabled = true;
-    try { setState((await api('/api/cashout', {})).state); }
+    try {
+      setState((await api('/api/cashout', {})).state);
+      if (myBet && myBet.status === 'won') { toast(`You cashed out at ${xs(myBet.cashoutAt)}: +${fmt(myBet.payout)} ${cfg.coin}`, 'good'); ding(880); }
+    }
     catch (e) { toast(e.message, 'bad'); }
     finally { renderBetButton(); }
     return;

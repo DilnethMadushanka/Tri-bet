@@ -1,11 +1,17 @@
-const { DatabaseSync } = require('node:sqlite');
-const { DB_PATH } = require('./config');
+// Database: libSQL (SQLite-compatible).
+//   - On Vercel: a hosted Turso database. Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN.
+//   - On your computer: a local file (DB_PATH, default data.sqlite). Nothing to set up.
+//
+// All calls are async. Inside tx(fn), every db call made by fn (and anything it calls) runs in
+// the same write transaction, so balance changes are all-or-nothing.
+const { createClient } = require('@libsql/client');
+const { AsyncLocalStorage } = require('node:async_hooks');
 
-const db = new DatabaseSync(DB_PATH);
-db.exec(`
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
+const url = process.env.TURSO_DATABASE_URL || `file:${process.env.DB_PATH || 'data.sqlite'}`;
+const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
+const als = new AsyncLocalStorage();
 
+const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT UNIQUE NOT NULL COLLATE NOCASE,
@@ -61,12 +67,14 @@ CREATE INDEX IF NOT EXISTS withdrawals_status ON withdrawals(status, id);
 
 -- One row per crash round. seed is secret until the round ends; hash = sha256(seed) is public from the start.
 CREATE TABLE IF NOT EXISTS rounds (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id INTEGER PRIMARY KEY,                   -- previous id + 1, so two servers can't both start the next round
   hash TEXT NOT NULL,
   seed TEXT NOT NULL,
   crash_point REAL NOT NULL,
   edge_pct REAL NOT NULL,
-  status TEXT NOT NULL DEFAULT 'betting',   -- betting | running | crashed | void
+  status TEXT NOT NULL DEFAULT 'open',      -- open | crashed (settled). Betting/running is worked out from the times.
+  betting_ends_at INTEGER NOT NULL,          -- = start of the flight
+  crash_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
   started_at INTEGER,
   ended_at INTEGER,
@@ -87,6 +95,7 @@ CREATE TABLE IF NOT EXISTS bets (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS bets_round ON bets(round_id);
+CREATE UNIQUE INDEX IF NOT EXISTS bets_one_per_round ON bets(round_id, user_id) WHERE status != 'refunded';
 CREATE INDEX IF NOT EXISTS bets_user ON bets(user_id, id DESC);
 
 -- Instant games (dice, mines, plinko, coin flip). Provably fair with a per-player seed pair.
@@ -124,19 +133,51 @@ CREATE TABLE IF NOT EXISTS plays (
 );
 CREATE INDEX IF NOT EXISTS plays_user ON plays(user_id, id DESC);
 CREATE INDEX IF NOT EXISTS plays_time ON plays(created_at);
-`);
+`;
 
-function tx(fn) {
-  if (db.isTransaction) return fn(); // already inside one: just run
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const out = fn();
-    db.exec('COMMIT');
-    return out;
-  } catch (e) {
-    db.exec('ROLLBACK');
-    throw e;
+let readyP = null;
+function ready() {
+  if (!readyP) {
+    readyP = client.executeMultiple(SCHEMA).catch((e) => { readyP = null; throw e; });
   }
+  return readyP;
 }
 
-module.exports = { db, tx };
+const plain = (rs) => rs.rows.map((row) => Object.fromEntries(rs.columns.map((c, i) => [c, row[i]])));
+async function exec(sql, args) {
+  await ready();
+  const target = als.getStore() || client;
+  return target.execute({ sql, args: args.map((a) => (a === undefined ? null : typeof a === 'boolean' ? (a ? 1 : 0) : a)) });
+}
+
+const db = {
+  async get(sql, ...args) { return plain(await exec(sql, args))[0]; },
+  async all(sql, ...args) { return plain(await exec(sql, args)); },
+  async run(sql, ...args) {
+    const rs = await exec(sql, args);
+    return { changes: rs.rowsAffected, lastId: rs.lastInsertRowid === undefined ? undefined : Number(rs.lastInsertRowid) };
+  },
+};
+
+// One write transaction at a time per server instance (the database also serialises writers).
+let queue = Promise.resolve();
+async function tx(fn) {
+  if (als.getStore()) return fn(); // already inside one
+  await ready();
+  const run = async () => {
+    const t = await client.transaction('write');
+    try {
+      const out = await als.run(t, fn);
+      await t.commit();
+      return out;
+    } catch (e) {
+      try { await t.rollback(); } catch {}
+      throw e;
+    } finally { t.close(); }
+  };
+  const p = queue.then(run, run);
+  queue = p.catch(() => {});
+  return p;
+}
+
+module.exports = { db, tx, ready, client };

@@ -10,6 +10,11 @@ A multiplayer game. Each round:
 2. **Flying**: the multiplier climbs from 1.00x. Players press **Cash out** to win bet × multiplier.
 3. **Crash**: at a secret point fixed before the round, it crashes. Bets not cashed out are lost.
 
+There is no game loop running on the server. Each round's times (betting ends, crash) are saved in the database
+when the round opens, and every request works out where the game is from the clock: it settles a round that has
+crashed, pays auto cash-outs that are due, and opens the next round. Pages ask for the state about twice a second
+during a flight and less often otherwise. That is what lets it run on Vercel.
+
 The house edge is set in Admin → Settings (default 3%). Players get back 97% of all bets on average.
 
 ## Instant games
@@ -28,8 +33,11 @@ Changing the seed reveals the old server seed, and the Provably fair page re-che
 ```
 npm install
 npm start            # http://localhost:3000
-npm test             # 18 tests: fairness maths, payback of every game, cash-outs, limits, referrals, refunds
+npm test             # 20 tests: fairness maths, payback of every game, the round timetable, cash-outs, limits, referrals
 ```
+
+Locally the data is kept in `data.sqlite` (change with `DB_PATH`). In production set `TURSO_DATABASE_URL` and
+`TURSO_AUTH_TOKEN` to use a hosted Turso database. To put it online, see [DEPLOY.md](DEPLOY.md) (Vercel).
 
 The first account that registers becomes the admin. Or run `ADMIN_USERNAME=name npm start`, or `npm run make-admin -- name`.
 
@@ -63,4 +71,6 @@ Coins are **virtual**. "Add coins" gives free demo coins, and withdrawals are on
 - `src/payments.js`: payment stub.
 - `src/admin.js`: admin API.
 - `src/settings.js`: admin-editable settings.
+- `src/db.js`: database (Turso / libSQL, or a local file).
+- `src/server.js`: routes. Exports the Express app for Vercel; `npm start` runs it locally.
 - `public/`: front end (`app.js` for crash and account pages, `games.js` for the instant games).

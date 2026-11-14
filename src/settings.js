@@ -20,17 +20,21 @@ const DEFAULTS = {
   gamePaused: false,        // admin switch: finish the current round, then start no new ones
 };
 
-let cache = null;
-function all() {
-  if (!cache) {
-    cache = { ...DEFAULTS };
-    for (const r of db.prepare('SELECT key, value FROM settings').all()) {
-      try { if (r.key in DEFAULTS) cache[r.key] = JSON.parse(r.value); } catch {}
-    }
+// Settings are read from the database at most every few seconds (each server keeps a copy).
+// Call `await load()` at the start of a request, then all()/get() are plain lookups.
+let cache = { ...DEFAULTS }, loadedAt = 0;
+const TTL = 3000;
+async function load(force = false) {
+  if (!force && Date.now() - loadedAt < TTL) return cache;
+  const next = { ...DEFAULTS };
+  for (const r of await db.all('SELECT key, value FROM settings')) {
+    try { if (r.key in DEFAULTS) next[r.key] = JSON.parse(r.value); } catch {}
   }
+  cache = next; loadedAt = Date.now();
   return cache;
 }
-const get = (k) => all()[k];
+const all = () => cache;
+const get = (k) => cache[k];
 
 class SettingsError extends Error {}
 const num = (v, min, max, name) => {
@@ -53,7 +57,8 @@ const RULES = {
   pauseSeconds: [1, 30, 'Pause after crash'],
 };
 
-function update(patch) {
+async function update(patch) {
+  await load(true);
   const clean = {};
   for (const [k, [min, max, name]] of Object.entries(RULES)) if (k in patch) clean[k] = num(patch[k], min, max, name);
   if ('gamePaused' in patch) clean.gamePaused = !!patch.gamePaused;
@@ -62,10 +67,10 @@ function update(patch) {
   const merged = { ...all(), ...clean };
   if (merged.minBet > merged.maxBet) throw new SettingsError('Minimum bet must not be more than maximum bet');
   if (merged.maxBet > merged.maxWin) throw new SettingsError('Maximum bet must not be more than maximum win');
-  const up = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
-  for (const [k, v] of Object.entries(clean)) up.run(k, JSON.stringify(v));
-  cache = null;
-  return all();
+  for (const [k, v] of Object.entries(clean)) {
+    await db.run('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', k, JSON.stringify(v));
+  }
+  return load(true);
 }
 
-module.exports = { all, get, update, DEFAULTS, SettingsError };
+module.exports = { load, all, get, update, DEFAULTS, SettingsError };

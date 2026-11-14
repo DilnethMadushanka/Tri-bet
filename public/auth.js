@@ -25,16 +25,21 @@ document.querySelectorAll('.pw-eye').forEach((b) => b.addEventListener('click', 
 
 // Live game preview on the login/register pages
 const demo = $('#demoRig');
-if (demo && window.EventSource) {
+if (demo) {
   demo.innerHTML = `<div class="lp-head"><span class="lp-dot"></span><b>Live now</b><span class="muted small" id="lpRound"></span></div>
     <div class="lp-mult mono" id="lpMult">1.00x</div><div class="lp-hist" id="lpHist"></div>`;
   let live = null, off = 0;
-  const es = new EventSource('/api/crash/stream');
-  es.onmessage = (m) => {
-    live = JSON.parse(m.data).state; off = live.serverNow - Date.now();
-    $('#lpRound').textContent = live.round ? `Round #${live.round.id}` : '';
-    $('#lpHist').innerHTML = live.history.slice(0, 8).map((h) => `<span class="hpill ${h.crashPoint >= 10 ? 'm-huge' : h.crashPoint >= 2 ? 'm-good' : 'm-low'}">${h.crashPoint.toFixed(2)}x</span>`).join('');
+  const load = async () => {
+    try {
+      if (!document.hidden) {
+        live = await (await fetch('/api/crash/state', { cache: 'no-store' })).json(); off = live.serverNow - Date.now();
+        $('#lpRound').textContent = live.round ? `Round #${live.round.id}` : '';
+        $('#lpHist').innerHTML = live.history.slice(0, 8).map((h) => `<span class="hpill ${h.crashPoint >= 10 ? 'm-huge' : h.crashPoint >= 2 ? 'm-good' : 'm-low'}">${h.crashPoint.toFixed(2)}x</span>`).join('');
+      }
+    } catch {}
+    setTimeout(load, live && live.round && live.round.status === 'running' ? 700 : 2000);
   };
+  load();
   setInterval(() => {
     const r = live && live.round; if (!r) return;
     const el = $('#lpMult');

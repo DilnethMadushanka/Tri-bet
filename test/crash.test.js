@@ -72,7 +72,8 @@ test('manual cash-out wins, auto cash-out wins, the rest lose', async () => {
   await assert.rejects(crash.placeBet(a, 5, null, t0 + 400), /already have a bet/);
   assert.equal(await bal(a), 90);
   const run = r.betting_ends_at;
-  await assert.rejects(crash.placeBet(await user(), 5, null, run + 1), /closed/);
+  const late = await user();
+  assert.equal((await crash.placeBet(late, 5, null, run + 1)).roundId, r.id + 1); // too late for this round: goes on the next
   await assert.rejects(crash.cancelBet(a, run + 1), /started/);
 
   const tOut = run + msToReach(2.2) + 5;
@@ -93,6 +94,39 @@ test('manual cash-out wins, auto cash-out wins, the rest lose', async () => {
   close(row.total_bet, 60);
   close(row.total_paid, 52);
   for (const id of [a, b, d]) close(await bal(id), await ledgerSum(id));
+});
+
+test('bet during a flight is locked in for the next round', async () => {
+  const a = await user();
+  const r = await round(3);
+  await crash.placeBet(a, 10, null, r.created_at + 1);           // this round
+  const res = await crash.placeBet(a, 20, 1.5, r.betting_ends_at + 500); // next round
+  assert.equal(res.roundId, r.id + 1);
+  assert.equal(res.nextRound, true);
+  await assert.rejects(crash.placeBet(a, 5, null, r.betting_ends_at + 600), /already have a bet on the next round/);
+  assert.equal(await bal(a), 70);
+  assert.equal((await crash.nextBet(a)).amount, 20);
+  // cancel the next-round bet while this round still flies, then place it again
+  await crash.cancelBet(a, r.betting_ends_at + 700);
+  assert.equal(await bal(a), 90);
+  assert.equal((await crash.myBet(a)).status, 'active'); // the flying bet is untouched
+  await crash.placeBet(a, 20, 1.5, r.betting_ends_at + 800);
+  // this round crashes; next round opens with the bet already in it
+  await crash.current(r.crash_at + 1);
+  assert.equal((await crash.myBet(a)).status, 'lost');
+  const next = await crash.current(r.crash_at + settings.get('pauseSeconds') * 1000 + 1);
+  assert.equal(next.id, r.id + 1);
+  const mine = await crash.myBet(a);
+  assert.equal(mine.roundId, next.id);
+  assert.equal(mine.amount, 20);
+  assert.equal(mine.status, 'active');
+  const st = await crash.publicState(next.created_at + 1);
+  assert.equal(st.playerCount, 1);
+  // it plays like any other bet: auto cash-out at 1.5x
+  await db.run('UPDATE rounds SET crash_point = 4, crash_at = ? WHERE id = ?', Math.ceil(next.betting_ends_at + msToReach(4)), next.id);
+  await crash.current(next.betting_ends_at + msToReach(2));
+  close((await crash.myBet(a)).payout, 30);
+  close(await bal(a), await ledgerSum(a));
 });
 
 test('settling twice pays once', async () => {

@@ -138,6 +138,7 @@ app.get('/api/crash/state', a(async (req, res) => {
   const row = await sessionRow(req.cookies.sid);
   if (row && !row.is_banned) {
     st.me = await crash.myBet(row.user_id, now);
+    st.meNext = await crash.nextBet(row.user_id);
     st.balance = (await game.getUser(row.user_id)).balance;
   }
   res.set('Cache-Control', 'no-store');
@@ -166,6 +167,7 @@ const wrap = (fn) => async (req, res) => {
     const state = await game.state(req.userId, now);
     state.withdrawals = await payments.userWithdrawals(req.userId);
     state.myBet = await crash.myBet(req.userId, now);
+    state.nextBet = await crash.nextBet(req.userId);
     state.plays = await instant.recentPlays(req.userId);
     state.seed = await instant.publicSeed(req.userId);
     state.mines = await instant.activeMines(req.userId);

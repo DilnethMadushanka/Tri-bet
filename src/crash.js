@@ -99,9 +99,14 @@ async function current(now = Date.now()) {
 }
 
 // ---------- player actions ----------
+// Bets go into the round that is taking bets. While a round is flying (or just crashed), a bet goes
+// into the NEXT round instead: it is locked in now and plays as soon as that round starts.
 async function placeBet(userId, amount, autoCashout, now = Date.now()) {
   const r = await current(now);
-  if (!r || phase(r, now) !== 'betting') throw new GameError('Bets are closed. Wait for the next round');
+  if (!r) throw new GameError('The game is paused. Try again soon');
+  const p = phase(r, now);
+  if (p !== 'betting' && settings.get('gamePaused')) throw new GameError('The game is paused. Try again soon');
+  const roundId = p === 'betting' ? r.id : r.id + 1;
   const s = settings.all();
   amount = round2(Number(amount));
   if (!Number.isFinite(amount) || amount < s.minBet || amount > s.maxBet) throw new GameError(`Bet must be between ${s.minBet} and ${s.maxBet}`);
@@ -113,24 +118,32 @@ async function placeBet(userId, amount, autoCashout, now = Date.now()) {
   return tx(async () => {
     const u = await game.getUser(userId);
     if (!u || u.is_banned) throw new GameError('This account is blocked');
-    if (await db.get("SELECT 1 AS x FROM bets WHERE round_id = ? AND user_id = ? AND status != 'refunded'", r.id, userId)) throw new GameError('You already have a bet in this round');
+    if (await db.get("SELECT 1 AS x FROM bets WHERE round_id = ? AND user_id = ? AND status != 'refunded'", roundId, userId)) {
+      throw new GameError(roundId === r.id ? 'You already have a bet in this round' : 'You already have a bet on the next round');
+    }
     await game.checkCanBet(u, amount, now);
     if (u.balance < amount - 1e-9) throw new GameError('Not enough balance');
     await db.run('UPDATE users SET balance = balance - ? WHERE id = ?', amount, userId);
-    await game.addLedger(userId, 'bet', -amount, `Bet on round #${r.id}${auto ? ` (auto cash-out ${auto.toFixed(2)}x)` : ''}`, now, { roundId: r.id });
-    const ins = await db.run('INSERT INTO bets (round_id, user_id, amount, auto_cashout, created_at) VALUES (?, ?, ?, ?, ?)', r.id, userId, amount, auto, now);
-    return { betId: ins.lastId };
+    await game.addLedger(userId, 'bet', -amount, `Bet on round #${roundId}${auto ? ` (auto cash-out ${auto.toFixed(2)}x)` : ''}`, now, { roundId });
+    const ins = await db.run('INSERT INTO bets (round_id, user_id, amount, auto_cashout, created_at) VALUES (?, ?, ?, ?, ?)', roundId, userId, amount, auto, now);
+    return { betId: ins.lastId, roundId, nextRound: roundId !== r.id };
   });
 }
 
+// Cancels a bet whose round hasn't started: the one in the betting round, or one locked in for the next round.
 async function cancelBet(userId, now = Date.now()) {
   const r = await current(now);
   return tx(async () => {
-    const b = r && await db.get("SELECT * FROM bets WHERE round_id = ? AND user_id = ? AND status = 'active'", r.id, userId);
-    if (!b) throw new GameError('No bet to cancel');
-    if (phase(r, now) !== 'betting') throw new GameError('The round has started. Cash out instead');
+    if (!r) throw new GameError('No bet to cancel');
+    const p = phase(r, now);
+    const roundId = p === 'betting' ? r.id : r.id + 1;
+    const b = await db.get("SELECT * FROM bets WHERE round_id = ? AND user_id = ? AND status = 'active'", roundId, userId);
+    if (!b) {
+      const flying = await db.get("SELECT 1 AS x FROM bets WHERE round_id = ? AND user_id = ? AND status = 'active'", r.id, userId);
+      throw new GameError(flying ? 'The round has started. Cash out instead' : 'No bet to cancel');
+    }
     await db.run("UPDATE bets SET status = 'refunded' WHERE id = ?", b.id);
-    await game.credit(userId, b.amount, 'bet_refund', `Bet on round #${r.id} cancelled`, now, { roundId: r.id });
+    await game.credit(userId, b.amount, 'bet_refund', `Bet on round #${roundId} cancelled`, now, { roundId });
   });
 }
 
@@ -179,11 +192,18 @@ async function publicState(now = Date.now()) {
   };
 }
 
-async function myBet(userId, now = Date.now()) {
+const betView = (b) => (b ? { roundId: b.round_id, amount: b.amount, autoCashout: b.auto_cashout, status: b.status, cashoutAt: b.cashout_at, payout: b.payout } : null);
+const betIn = (roundId, userId) => db.get("SELECT amount, auto_cashout, status, cashout_at, payout, round_id FROM bets WHERE round_id = ? AND user_id = ? AND status != 'refunded'", roundId, userId);
+
+// My bet in the latest round.
+async function myBet(userId) {
   const r = await latest();
-  if (!r) return null;
-  const b = await db.get("SELECT amount, auto_cashout, status, cashout_at, payout, round_id FROM bets WHERE round_id = ? AND user_id = ? AND status != 'refunded'", r.id, userId);
-  return b ? { roundId: b.round_id, amount: b.amount, autoCashout: b.auto_cashout, status: b.status, cashoutAt: b.cashout_at, payout: b.payout } : null;
+  return r ? betView(await betIn(r.id, userId)) : null;
+}
+// My bet locked in for the round after the latest one (placed while it was flying).
+async function nextBet(userId) {
+  const r = await latest();
+  return r ? betView(await betIn(r.id + 1, userId)) : null;
 }
 
-module.exports = { current, placeBet, cancelBet, cashout, publicState, myBet, settle, crashPointFromSeed, hashSeed, multAt, msToReach, GROWTH, phase };
+module.exports = { current, placeBet, cancelBet, cashout, publicState, myBet, nextBet, settle, crashPointFromSeed, hashSeed, multAt, msToReach, GROWTH, phase };

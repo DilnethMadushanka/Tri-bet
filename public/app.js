@@ -6,7 +6,7 @@ let cfg = null, st = null;   // config, my account state
 let live = null;             // public game state from the server
 let clockOffset = 0;         // server time - my time
 let myBet = null;            // my bet in the current round
-let queued = null;           // a bet waiting for the next round
+let nextBet = null;          // my bet locked in for the next round (placed during a flight)
 let betsTab = 'round';
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
@@ -71,6 +71,7 @@ function setState(s) {
   const first = !st;
   st = s;
   if (s.myBet !== undefined) myBet = s.myBet;
+  if (s.nextBet !== undefined) nextBet = s.nextBet;
   $('app').classList.remove('hidden');
   ['navAdmin', 'topAdmin'].forEach((id) => $(id).classList.toggle('hidden', !s.user.isAdmin));
   const pend = (s.withdrawals || []).filter((w) => w.status === 'pending').length;
@@ -100,7 +101,7 @@ async function act(path, body, okMsg) {
 
 // ---------- live game feed ----------
 // The server has no always-on process, so the page asks for the game state on a timer.
-// Faster while the plane flies, slower otherwise, and paused while the tab is hidden.
+// Faster while the rocket flies, slower otherwise, and paused while the tab is hidden.
 let pollT = null, polling = false, failCount = 0;
 function schedulePoll(ms) { clearTimeout(pollT); pollT = setTimeout(poll, ms); }
 async function poll() {
@@ -153,12 +154,12 @@ function onLive(state) {
       refreshSoon();
     }
     myBet = me;
+    if (state.meNext !== undefined) nextBet = state.meNext;
     if (st && typeof state.balance === 'number' && state.balance !== st.user.balance) {
       st.user.balance = state.balance;
       $('balance').textContent = fmt(state.balance); $('lobbyBal').textContent = fmt(state.balance);
     }
   }
-  if (r && r.status === 'betting' && queued && st) { const q = queued; queued = null; placeBet(q); }
   if (r && r.status === 'crashed' && prevStatus !== 'crashed' && prevRound === r.id) {
     if (myBet) refreshSoon();
     boom();
@@ -197,6 +198,51 @@ function currentMult(r) {
   if (r.status === 'crashed') return r.crashPoint;
   if (r.status !== 'running') return 1;
   return Math.max(1, Math.floor(100 * Math.exp(live.growth * (serverNow() - r.startedAt))) / 100);
+}
+
+// ---------- rocket ----------
+const smoke = [];
+function drawSmoke(c) {
+  for (let i = smoke.length - 1; i >= 0; i--) {
+    const p = smoke[i];
+    p.x += p.vx; p.y += p.vy; p.life -= 0.018; p.r += 0.25;
+    if (p.life <= 0) { smoke.splice(i, 1); continue; }
+    c.globalAlpha = p.life * 0.35; c.fillStyle = '#c8cde6';
+    c.beginPath(); c.arc(p.x, p.y, p.r, 0, 7); c.fill();
+  }
+  c.globalAlpha = 1;
+  if (smoke.length > 160) smoke.splice(0, smoke.length - 160);
+}
+// A small rocket drawn in local space pointing along +x, then rotated to `ang`. `flame` is the flame length (0..2).
+function drawRocket(c, x, y, ang, k, flame) {
+  c.save();
+  c.translate(x, y); c.rotate(ang); c.scale(k, k);
+  // flame
+  const fl = 10 + flame * 16 * (0.85 + Math.random() * 0.3);
+  const fg = c.createLinearGradient(-14, 0, -14 - fl, 0);
+  fg.addColorStop(0, '#fff6d5'); fg.addColorStop(0.3, '#ffb020'); fg.addColorStop(1, 'rgba(255,77,109,0)');
+  c.fillStyle = fg;
+  c.beginPath(); c.moveTo(-13, -5); c.quadraticCurveTo(-14 - fl * 0.6, -4, -14 - fl, 0); c.quadraticCurveTo(-14 - fl * 0.6, 4, -13, 5); c.closePath(); c.fill();
+  // glow
+  c.shadowColor = 'rgba(0,224,164,.6)'; c.shadowBlur = 16;
+  // fins
+  c.fillStyle = '#ff4d6d';
+  c.beginPath(); c.moveTo(-8, -6); c.lineTo(-16, -14); c.lineTo(-13, -5); c.closePath(); c.fill();
+  c.beginPath(); c.moveTo(-8, 6); c.lineTo(-16, 14); c.lineTo(-13, 5); c.closePath(); c.fill();
+  // body
+  const bg = c.createLinearGradient(0, -7, 0, 7);
+  bg.addColorStop(0, '#ffffff'); bg.addColorStop(0.55, '#dfe4f5'); bg.addColorStop(1, '#9aa3c7');
+  c.fillStyle = bg;
+  c.beginPath(); c.moveTo(-13, -6); c.lineTo(8, -6); c.quadraticCurveTo(20, -5, 25, 0); c.quadraticCurveTo(20, 5, 8, 6); c.lineTo(-13, 6); c.closePath(); c.fill();
+  c.shadowBlur = 0;
+  // nose cone
+  c.fillStyle = '#ff4d6d';
+  c.beginPath(); c.moveTo(14, -5.2); c.quadraticCurveTo(21, -4, 25, 0); c.quadraticCurveTo(21, 4, 14, 5.2); c.closePath(); c.fill();
+  // window
+  c.fillStyle = '#0b0d18'; c.beginPath(); c.arc(4, 0, 3.6, 0, 7); c.fill();
+  c.fillStyle = '#00e0a4'; c.beginPath(); c.arc(4, 0, 2.4, 0, 7); c.fill();
+  c.fillStyle = 'rgba(255,255,255,.8)'; c.beginPath(); c.arc(3.2, -0.9, 0.8, 0, 7); c.fill();
+  c.restore();
 }
 
 function frame() {
@@ -265,27 +311,37 @@ function frame() {
     c.beginPath(); pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
     c.strokeStyle = col; c.lineWidth = 4; c.shadowColor = col; c.shadowBlur = 18; c.stroke(); c.shadowBlur = 0;
 
-    // the comet at the tip
+    // the rocket at the tip, pointing along the curve
     const [tx, ty] = pts[pts.length - 1];
+    const [px, py] = pts[Math.max(0, pts.length - 4)];
+    const ang = Math.atan2(ty - py, tx - px) || -0.5;
     if (running) {
-      const pulse = 1 + Math.sin(Date.now() / 120) * 0.12;
-      const g = c.createRadialGradient(tx, ty, 0, tx, ty, 26 * pulse);
-      g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.25, 'rgba(0,224,164,.9)'); g.addColorStop(1, 'rgba(124,92,255,0)');
-      c.fillStyle = g; c.beginPath(); c.arc(tx, ty, 26 * pulse, 0, 7); c.fill();
-      // chevrons pointing up (our logo)
-      c.strokeStyle = '#0b0d18'; c.lineWidth = 3; c.lineCap = 'round'; c.lineJoin = 'round';
-      c.beginPath(); c.moveTo(tx - 6, ty + 2); c.lineTo(tx, ty - 4); c.lineTo(tx + 6, ty + 2); c.stroke();
+      // exhaust smoke left behind
+      if (Math.random() < 0.6) smoke.push({ x: tx - Math.cos(ang) * 22, y: ty - Math.sin(ang) * 22, vx: -Math.cos(ang) * 0.6 + (Math.random() - 0.5) * 0.5, vy: -Math.sin(ang) * 0.6 + (Math.random() - 0.5) * 0.5, life: 1, r: 3 + Math.random() * 3 });
+      drawSmoke(c);
+      drawRocket(c, tx, ty, ang, 1.25, 0.7 + Math.min(1.3, Math.log(m)) * 0.6);
     } else {
-      // burst
-      const age = Math.min(1, (now - (r.endedAt || now)) / 600 + 0.3);
-      for (let i = 0; i < 14; i++) {
-        const a = (i / 14) * Math.PI * 2, d = 10 + age * 34;
-        c.fillStyle = i % 2 ? '#ff4d6d' : '#ffb020';
-        c.globalAlpha = 1 - age * 0.7;
-        c.beginPath(); c.arc(tx + Math.cos(a) * d, ty + Math.sin(a) * d, 3, 0, 7); c.fill();
+      drawSmoke(c);
+      // explosion where the rocket was
+      const age = Math.min(1, (now - (r.endedAt || now)) / 700);
+      const fire = c.createRadialGradient(tx, ty, 0, tx, ty, 14 + age * 40);
+      fire.addColorStop(0, `rgba(255,240,200,${1 - age})`); fire.addColorStop(0.35, `rgba(255,160,40,${0.9 - age * 0.8})`); fire.addColorStop(1, 'rgba(255,77,109,0)');
+      c.fillStyle = fire; c.beginPath(); c.arc(tx, ty, 14 + age * 40, 0, 7); c.fill();
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2 + i, d = 8 + age * (30 + (i % 4) * 10);
+        c.fillStyle = i % 3 === 0 ? '#ffd166' : i % 3 === 1 ? '#ff7a3d' : '#9aa3c7';
+        c.globalAlpha = Math.max(0, 1 - age * 0.9);
+        c.save(); c.translate(tx + Math.cos(a) * d, ty + Math.sin(a) * d); c.rotate(a + age * 4);
+        c.fillRect(-3, -1.5, 6, 3); c.restore();
       }
       c.globalAlpha = 1;
     }
+  } else if (r && r.status === 'betting') {
+    // waiting on the launch pad, engine idling
+    smoke.length = 0;
+    const lx = X(0) + 18, ly = Y(1) - 14;
+    c.fillStyle = 'rgba(255,255,255,.12)'; c.fillRect(lx - 22, Y(1) - 2, 44, 3);
+    drawRocket(c, lx, ly, -Math.PI / 2, 1.1, 0.25 + Math.random() * 0.1);
   }
 
   // centre text
@@ -340,6 +396,7 @@ async function placeBet(p) {
     const d = await api('/api/bet', p);
     setState(d.state);
     ding(520);
+    if (d.nextRound) toast(`Bet of ${fmt(p.amount)} locked in for the next round`, 'good');
   } catch (e) { toast(e.message, 'bad'); }
 }
 $('betBtn').addEventListener('click', async () => {
@@ -358,8 +415,8 @@ $('betBtn').addEventListener('click', async () => {
     finally { renderBetButton(); }
     return;
   }
-  if (mode === 'queue') { queued = betParams(); toast(`Bet of ${fmt(queued.amount)} queued for the next round`); return renderBetButton(); }
-  if (mode === 'unqueue') { queued = null; return renderBetButton(); }
+  if (mode === 'queue') return placeBet(betParams(), true);
+  if (mode === 'unqueue') return act('/api/bet/cancel', {}, 'Next-round bet cancelled');
 });
 
 function renderBetButton() {
@@ -375,7 +432,7 @@ function renderBetButton() {
     else { mode = 'bet'; label = 'BET'; subl = `${fmt(amountVal())} ${cfg.coin}`; cls = 'go'; }
   } else if (r.status === 'running' && myBet && myBet.status === 'active') {
     mode = 'cashout'; label = 'CASH OUT'; subl = `${fmt(myBet.amount * currentMult(r))} ${cfg.coin}`; cls = 'cash';
-  } else if (queued) { mode = 'unqueue'; label = 'CANCEL'; subl = 'Waiting for next round'; cls = 'cancel'; }
+  } else if (nextBet && nextBet.status === 'active') { mode = 'unqueue'; label = 'CANCEL'; subl = `Bet ${fmt(nextBet.amount)} on next round`; cls = 'cancel'; }
   else if (!live.paused) { mode = 'queue'; label = 'BET'; subl = 'Next round'; cls = 'go dim'; }
   else { label = 'PAUSED'; }
   b.dataset.mode = mode;

@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS rounds (
 
 CREATE TABLE IF NOT EXISTS bets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  round_id INTEGER NOT NULL REFERENCES rounds(id),
+  round_id INTEGER NOT NULL,                -- may be the next round (not opened yet) for a bet placed early
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   amount REAL NOT NULL,
   auto_cashout REAL,                       -- null = manual only
@@ -167,7 +167,7 @@ function tursoBackend() {
 // ---------- local file (Node's built-in SQLite, no extra install) ----------
 function fileBackend() {
   const { DatabaseSync } = require('node:sqlite');
-  const conn = new DatabaseSync(filePath);
+  const conn = new DatabaseSync(filePath, { enableForeignKeyConstraints: false });
   conn.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
   return {
     init: async () => conn.exec(SCHEMA),

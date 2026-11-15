@@ -6,7 +6,8 @@ Five games on one balance: Crash, Dice, Mines, Plinko and Coin Flip. All have th
 
 A multiplayer game. Each round:
 
-1. **Betting** (7 s): players place a bet, optionally with an auto cash-out (for example 2.00x).
+1. **Betting** (7 s): players place a bet, optionally with an auto cash-out (for example 2.00x). A bet placed while
+   the previous round is still flying is locked in for the next round (it can be cancelled until that round starts).
 2. **Flying**: the multiplier climbs from 1.00x. Players press **Cash out** to win bet × multiplier.
 3. **Crash**: at a secret point fixed before the round, it crashes. Bets not cashed out are lost.
 
